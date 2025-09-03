@@ -6,8 +6,10 @@
 #include <stdexcept>
 #include <sstream>
 #include <functional>
+#include  <winnt.h>
 
 namespace fs = std::filesystem;
+
 bool Debugger::createDebugProc(const std::string& prog)
 {
     if (!fs::exists(prog)) 
@@ -59,13 +61,13 @@ void Debugger::run(const std::string& prog)
         std::cerr << "Failed to create process: " << GetLastError() << std::endl;
 }
 
-size_t Debugger::disasDebugProc(PVOID addr, size_t instCount)
+size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
 {
     size_t size = 15 * instCount;
     std::vector<BYTE> buf(size);
     size_t offset = 0;
 
-    if (!ReadProcessMemory(hProcess, addr, buf.data(), size, NULL)) 
+    if (!ReadProcessMemory(hProcess, (LPCVOID)addr, buf.data(), size, NULL))
     {
         std::cerr << "Failed to read memory: " << GetLastError() << std::endl;
         return 0;
@@ -79,26 +81,26 @@ size_t Debugger::disasDebugProc(PVOID addr, size_t instCount)
         if (!len) {
             break;
         }
-        std::cout << std::hex << (size_t)addr + offset << ": " << hexBuf << " " << asmBuf << std::endl;
+        std::cout << std::hex << (DWORD_PTR)addr + offset << ": " << hexBuf << " " << asmBuf << std::endl;
         offset += len;
     }
 
     return offset;
 }
 
-void Debugger::setBreakPoint(DWORD addr, BreakType type)
+void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type)
 {
     auto it = breakMap.find(addr);
     if (it == breakMap.end())
     {
-        DWORD saveByte;
+        BYTE saveByte;
         ReadProcessMemory(hProcess, (PVOID)addr, &saveByte, 1, NULL);
         WriteProcessMemory(hProcess, (PVOID)addr, "\xCC", 1, NULL);
         breakMap[addr] = { BreakState::enable, BreakType::software, saveByte };
     }
 }
 
-void Debugger::deleteBreakPoint(DWORD addr)
+void Debugger::deleteBreakPoint(DWORD_PTR addr)
 {
     auto it = breakMap.find(addr);
     if (it != breakMap.end())
@@ -116,43 +118,43 @@ void Debugger::deleteBreakPoint(DWORD addr)
 
 void Debugger::printRegisters(const CONTEXT& context)
 {
-    std::cout << "eax = " << std::hex << std::setw(8) << std::setfill('0') << context.Eax << "  "
-        << "ebx = " << std::hex << std::setw(8) << std::setfill('0') << context.Ebx << "  "
-        << "ecx = " << std::hex << std::setw(8) << std::setfill('0') << context.Ecx << "  "
-        << "edx = " << std::hex << std::setw(8) << std::setfill('0') << context.Edx << "\n";
+    std::cout << std::hex << std::setfill('0');
 
-    std::cout << "edi = " << std::hex << std::setw(8) << std::setfill('0') << context.Edi << "  "
-        << "esi = " << std::hex << std::setw(8) << std::setfill('0') << context.Esi << "  "
-        << "ebp = " << std::hex << std::setw(8) << std::setfill('0') << context.Ebp << "  "
-        << "esp = " << std::hex << std::setw(8) << std::setfill('0') << context.Esp << "\n";
-
-    std::cout << "eflags = " << std::hex << std::setw(8) << std::setfill('0') << context.EFlags << "\n";
+#ifdef _WIN64
+    // 64-битные регистры
+    std::cout
+        << "rax = " << std::setw(8) << context.Rax << " "
+        << "rbx = " << std::setw(8) << context.Rbx << " "
+        << "rcx = " << std::setw(8) << context.Rcx << " "
+        << "rdx = " << std::setw(8) << context.Rdx << "\n"
+        << "rsi = " << std::setw(8) << context.Rsi << " "
+        << "rdi = " << std::setw(8) << context.Rdi << " "
+        << "rbp = " << std::setw(8) << context.Rbp << " "
+        << "rsp = " << std::setw(8) << context.Rsp << "\n"
+        << "rip = " << std::setw(8) << context.Rip << " "
+        << "rflags = " << std::setw(8) << context.EFlags << "\n";
+#else
+    // 32-битные регистры
+    std::cout
+        << "eax = " << std::setw(8) << context.Eax << " "
+        << "ebx = " << std::setw(8) << context.Ebx << " "
+        << "ecx = " << std::setw(8) << context.Ecx << " "
+        << "edx = " << std::setw(8) << context.Edx << "\n"
+        << "esi = " << std::setw(8) << context.Esi << " "
+        << "edi = " << std::setw(8) << context.Edi << " "
+        << "ebp = " << std::setw(8) << context.Ebp << " "
+        << "esp = " << std::setw(8) << context.Esp << "\n"
+        << "eip = " << std::setw(8) << context.Eip << " "
+        << "eflags = " << std::setw(8) << context.EFlags << "\n";
+#endif
 }
 
-void Debugger::changeRegisters(CONTEXT* context, const std::string& reg, DWORD value)
-{
-    static const std::unordered_map<std::string, DWORD CONTEXT::*> regMap = {
-        {"eax", &CONTEXT::Eax},
-        {"ebx", &CONTEXT::Ebx},
-        {"ecx", &CONTEXT::Ecx},
-        {"edx", &CONTEXT::Edx},
-        {"edi", &CONTEXT::Edi},
-        {"esi", &CONTEXT::Esi},
-        {"ebp", &CONTEXT::Ebp},
-        {"esp", &CONTEXT::Esp},
-        {"eflags", &CONTEXT::EFlags},
-    };
 
-    auto it = regMap.find(reg);
-    if (it != regMap.end()) 
-        context->*(it->second) = value;
 
-}
-
-std::vector<BYTE> Debugger::getDumpMemory(PVOID addr, size_t size=128)
+std::vector<BYTE> Debugger::getDumpMemory(DWORD_PTR addr, size_t size=128)
 {
     std::vector<BYTE> buffer(size, 0);
-    if (!ReadProcessMemory(hProcess, addr, buffer.data(), size, NULL)) {
+    if (!ReadProcessMemory(hProcess, (PVOID)addr, buffer.data(), size, NULL)) {
         DWORD error = GetLastError();
         std::string errorMsg = "FAILED READ MEMORY: Error code " + std::to_string(error);
         throw std::runtime_error(errorMsg);
@@ -160,7 +162,7 @@ std::vector<BYTE> Debugger::getDumpMemory(PVOID addr, size_t size=128)
     return buffer;
 }
 
-void Debugger::printMemory(PVOID addr, size_t size=128)
+void Debugger::printMemory(DWORD_PTR addr, size_t size=128)
 {
     try 
     {
@@ -168,7 +170,7 @@ void Debugger::printMemory(PVOID addr, size_t size=128)
         for (size_t i = 0; i < buff.size(); i += lineSize)
         {
             std::cout << std::hex << std::setw(8) << std::setfill('0')
-                << reinterpret_cast<uintptr_t>(addr) << ": ";
+                << static_cast<uintptr_t>(addr) << ": ";
             for (size_t j = 0; j < lineSize; ++j) 
             {
                 if (i + j < size) 
@@ -196,7 +198,7 @@ void Debugger::printMemory(PVOID addr, size_t size=128)
             }
 
             std::cout << std::endl;
-            addr = reinterpret_cast<PVOID>(reinterpret_cast<uintptr_t>(addr) + lineSize);
+            addr = (static_cast<uintptr_t>(addr) + lineSize);
         }
 
     }
@@ -206,10 +208,10 @@ void Debugger::printMemory(PVOID addr, size_t size=128)
     }
 }
 
-void Debugger::changeMemory(PVOID addr, DWORD value, size_t size = 4)
+void Debugger::changeMemory(DWORD_PTR addr, size_t value, size_t size = 4)
 {
     MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQueryEx(hProcess, addr, &mbi, sizeof(mbi)) == 0) 
+    if (VirtualQueryEx(hProcess, (PVOID)addr, &mbi, sizeof(mbi)) == 0) 
     {
         DWORD error = GetLastError();
         std::string errorMsg = "FAILED WRITE MEMORY: Error code " + std::to_string(error);
@@ -219,7 +221,7 @@ void Debugger::changeMemory(PVOID addr, DWORD value, size_t size = 4)
     //if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY
     //    || mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_WRITECOPY)
 
-        if (!WriteProcessMemory(hProcess, addr, &value, size, nullptr)) 
+        if (!WriteProcessMemory(hProcess, (PVOID)addr, &value, size, nullptr)) 
         {
             DWORD error = GetLastError();
             std::string errorMsg = "FAILED WRITE MEMORY: Error code " + std::to_string(error);
@@ -260,7 +262,7 @@ void Debugger::debugRun()
         case CREATE_PROCESS_DEBUG_EVENT:
             std::cout << "Process created: " << debugEvent.dwProcessId << std::endl;
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
-            disasDebugProc((PVOID)entryPoint);
+            disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
             setBreakPoint((DWORD)entryPoint, BreakType::software);
             std::cout << "Entry point address: 0x" << std::hex << entryPoint << std::endl;
             
@@ -313,7 +315,7 @@ void Debugger::debugRun()
 
 
 
-size_t Debugger::breakpointEvent(DWORD tid, ULONG_PTR exceptionAddr)
+size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
 {
     CONTEXT context;
     HANDLE thread;
@@ -329,14 +331,18 @@ size_t Debugger::breakpointEvent(DWORD tid, ULONG_PTR exceptionAddr)
         WriteProcessMemory(hProcess, (PVOID)exceptionAddr, &it->second.saveByte, 1, NULL);
         it->second.state = BreakState::disable;
     }
-    disasDebugProc((PVOID)exceptionAddr, 1);
+    disasDebugProc(exceptionAddr, 1);
 
     thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
     if (thread != INVALID_HANDLE_VALUE) {
         context.ContextFlags = CONTEXT_ALL;
         GetThreadContext(thread, &context);
         if (it != breakMap.end()) 
-            context.Eip = exceptionAddr;
+            #ifdef _WIN64
+                context.Rip = exceptionAddr;
+            #else
+                context.Eip = exceptionAddr;
+            #endif
 
         
     }
@@ -470,14 +476,14 @@ void Debugger::handleDelCommand(std::istringstream& stream)
 void Debugger::handleDumpCommand(std::istringstream& stream)
 {
     DWORD addr = getAddr(stream);
-    printMemory((PVOID)addr);
+    printMemory(addr);
 }
 
 
 void Debugger::handleDisasCommand(std::istringstream& stream)
 {
-    DWORD addr = getAddr(stream);
-    disasDebugProc((PVOID)addr);
+    DWORD_PTR addr = getAddr(stream);
+    disasDebugProc(addr);
 }
 
 void  Debugger::handleEditCommand(std::istringstream& stream)
@@ -496,7 +502,7 @@ void  Debugger::handleEditCommand(std::istringstream& stream)
             std::cerr << "Invalid value format. Expected hexadecimal value.\n";
             return;
         }
-        changeMemory((PVOID)addr, value, dataSize[strSize]);
+        changeMemory(addr, value, dataSize[strSize]);
     }
     else
     {
@@ -517,7 +523,7 @@ void  Debugger::handleEditCommand(std::istringstream& stream)
 void Debugger::handleRegCommand(std::istringstream& stream, CONTEXT& context)
 {
     std::string regName;
-    DWORD value;
+    DWORD_PTR value;  // Используем DWORD_PTR вместо DWORD
 
     // Если аргументов нет, выводим все регистры
     if (stream.peek() == EOF) {
@@ -532,33 +538,100 @@ void Debugger::handleRegCommand(std::istringstream& stream, CONTEXT& context)
         return;
     }
 
-    // Маппинг регистров и подрегистров
-    static const std::unordered_map<std::string, std::function<void(CONTEXT&, DWORD)>> regMap = {
-        {"eax", [](CONTEXT& ctx, DWORD val) { ctx.Eax = val; }},
-        {"ebx", [](CONTEXT& ctx, DWORD val) { ctx.Ebx = val; }},
-        {"ecx", [](CONTEXT& ctx, DWORD val) { ctx.Ecx = val; }},
-        {"edx", [](CONTEXT& ctx, DWORD val) { ctx.Edx = val; }},
-        {"edi", [](CONTEXT& ctx, DWORD val) { ctx.Edi = val; }},
-        {"esi", [](CONTEXT& ctx, DWORD val) { ctx.Esi = val; }},
-        {"ebp", [](CONTEXT& ctx, DWORD val) { ctx.Ebp = val; }},
-        {"esp", [](CONTEXT& ctx, DWORD val) { ctx.Esp = val; }},
-        {"eflags", [](CONTEXT& ctx, DWORD val) { ctx.EFlags = val; }},
+    // Определяем маппинг регистров в зависимости от разрядности
+#ifdef _WIN64
+    // 64-битные регистры и их части
+    static const std::unordered_map<std::string, std::function<void(CONTEXT&, DWORD_PTR)>> regMap = {
+        // Полные 64-битные регистры
+        {"rax", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rax = val; }},
+        {"rbx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbx = val; }},
+        {"rcx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rcx = val; }},
+        {"rdx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdx = val; }},
+        {"rdi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdi = val; }},
+        {"rsi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsi = val; }},
+        {"rbp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbp = val; }},
+        {"rsp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsp = val; }},
+        {"rip", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rip = val; }},
+        {"rflags", [](CONTEXT& ctx, DWORD_PTR val) { ctx.EFlags = static_cast<DWORD>(val); }},
 
-        // Подрегистры
-        {"ax", [](CONTEXT& ctx, DWORD val) { ctx.Eax = (ctx.Eax & 0xFFFF0000) | (val & 0xFFFF); }},
-        {"bx", [](CONTEXT& ctx, DWORD val) { ctx.Ebx = (ctx.Ebx & 0xFFFF0000) | (val & 0xFFFF); }},
-        {"cx", [](CONTEXT& ctx, DWORD val) { ctx.Ecx = (ctx.Ecx & 0xFFFF0000) | (val & 0xFFFF); }},
-        {"dx", [](CONTEXT& ctx, DWORD val) { ctx.Edx = (ctx.Edx & 0xFFFF0000) | (val & 0xFFFF); }},
+        // Дополнительные 64-битные регистры
+        {"r8",  [](CONTEXT& ctx, DWORD_PTR val) { ctx.R8 = val; }},
+        {"r9",  [](CONTEXT& ctx, DWORD_PTR val) { ctx.R9 = val; }},
+        {"r10", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R10 = val; }},
+        {"r11", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R11 = val; }},
+        {"r12", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R12 = val; }},
+        {"r13", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R13 = val; }},
+        {"r14", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R14 = val; }},
+        {"r15", [](CONTEXT& ctx, DWORD_PTR val) { ctx.R15 = val; }},
 
-        {"al", [](CONTEXT& ctx, DWORD val) { ctx.Eax = (ctx.Eax & 0xFFFFFF00) | (val & 0xFF); }},
-        {"ah", [](CONTEXT& ctx, DWORD val) { ctx.Eax = (ctx.Eax & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
-        {"bl", [](CONTEXT& ctx, DWORD val) { ctx.Ebx = (ctx.Ebx & 0xFFFFFF00) | (val & 0xFF); }},
-        {"bh", [](CONTEXT& ctx, DWORD val) { ctx.Ebx = (ctx.Ebx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
-        {"cl", [](CONTEXT& ctx, DWORD val) { ctx.Ecx = (ctx.Ecx & 0xFFFFFF00) | (val & 0xFF); }},
-        {"ch", [](CONTEXT& ctx, DWORD val) { ctx.Ecx = (ctx.Ecx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
-        {"dl", [](CONTEXT& ctx, DWORD val) { ctx.Edx = (ctx.Edx & 0xFFFFFF00) | (val & 0xFF); }},
-        {"dh", [](CONTEXT& ctx, DWORD val) { ctx.Edx = (ctx.Edx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
+        // Младшие 32 бита (например, eax = младшие 32 бита rax)
+        {"eax", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rax = (ctx.Rax & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"ebx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbx = (ctx.Rbx & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"ecx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rcx = (ctx.Rcx & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"edx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdx = (ctx.Rdx & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"edi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdi = (ctx.Rdi & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"esi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsi = (ctx.Rsi & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"ebp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbp = (ctx.Rbp & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"esp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsp = (ctx.Rsp & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+        {"eip", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rip = (ctx.Rip & 0xFFFFFFFF00000000ULL) | (val & 0xFFFFFFFF); }},
+
+        // Младшие 16 бит (например, ax = младшие 16 бит rax)
+        {"ax", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rax = (ctx.Rax & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"bx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbx = (ctx.Rbx & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"cx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rcx = (ctx.Rcx & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"dx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdx = (ctx.Rdx & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"di", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdi = (ctx.Rdi & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"si", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsi = (ctx.Rsi & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"bp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbp = (ctx.Rbp & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"sp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rsp = (ctx.Rsp & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+        {"ip", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rip = (ctx.Rip & 0xFFFFFFFFFFFF0000ULL) | (val & 0xFFFF); }},
+
+        // Младшие 8 бит (например, al = младшие 8 бит rax)
+        {"al", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rax = (ctx.Rax & 0xFFFFFFFFFFFFFF00ULL) | (val & 0xFF); }},
+        {"ah", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rax = (ctx.Rax & 0xFFFFFFFFFFFF00FFULL) | ((val & 0xFF) << 8); }},
+        {"bl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbx = (ctx.Rbx & 0xFFFFFFFFFFFFFF00ULL) | (val & 0xFF); }},
+        {"bh", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rbx = (ctx.Rbx & 0xFFFFFFFFFFFF00FFULL) | ((val & 0xFF) << 8); }},
+        {"cl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rcx = (ctx.Rcx & 0xFFFFFFFFFFFFFF00ULL) | (val & 0xFF); }},
+        {"ch", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rcx = (ctx.Rcx & 0xFFFFFFFFFFFF00FFULL) | ((val & 0xFF) << 8); }},
+        {"dl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdx = (ctx.Rdx & 0xFFFFFFFFFFFFFF00ULL) | (val & 0xFF); }},
+        {"dh", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Rdx = (ctx.Rdx & 0xFFFFFFFFFFFF00FFULL) | ((val & 0xFF) << 8); }},
     };
+#else
+    // 32-битные регистры и их части
+    static const std::unordered_map<std::string, std::function<void(CONTEXT&, DWORD_PTR)>> regMap = {
+        {"eax", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eax = static_cast<DWORD>(val); }},
+        {"ebx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebx = static_cast<DWORD>(val); }},
+        {"ecx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ecx = static_cast<DWORD>(val); }},
+        {"edx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edx = static_cast<DWORD>(val); }},
+        {"edi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edi = static_cast<DWORD>(val); }},
+        {"esi", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Esi = static_cast<DWORD>(val); }},
+        {"ebp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebp = static_cast<DWORD>(val); }},
+        {"esp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Esp = static_cast<DWORD>(val); }},
+        {"eip", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eip = static_cast<DWORD>(val); }},
+        {"eflags", [](CONTEXT& ctx, DWORD_PTR val) { ctx.EFlags = static_cast<DWORD>(val); }},
+
+        // Подрегистры: 16 бит
+        {"ax", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eax = (ctx.Eax & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"bx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebx = (ctx.Ebx & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"cx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ecx = (ctx.Ecx & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"dx", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edx = (ctx.Edx & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"di", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edi = (ctx.Edi & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"si", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Esi = (ctx.Esi & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"bp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebp = (ctx.Ebp & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"sp", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Esp = (ctx.Esp & 0xFFFF0000) | (val & 0xFFFF); }},
+        {"ip", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eip = (ctx.Eip & 0xFFFF0000) | (val & 0xFFFF); }},
+
+        // Подрегистры: 8 бит
+        {"al", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eax = (ctx.Eax & 0xFFFFFF00) | (val & 0xFF); }},
+        {"ah", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Eax = (ctx.Eax & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
+        {"bl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebx = (ctx.Ebx & 0xFFFFFF00) | (val & 0xFF); }},
+        {"bh", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ebx = (ctx.Ebx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
+        {"cl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ecx = (ctx.Ecx & 0xFFFFFF00) | (val & 0xFF); }},
+        {"ch", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Ecx = (ctx.Ecx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
+        {"dl", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edx = (ctx.Edx & 0xFFFFFF00) | (val & 0xFF); }},
+        {"dh", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edx = (ctx.Edx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
+    };
+#endif
 
     // Поиск и изменение регистра
     auto it = regMap.find(regName);
