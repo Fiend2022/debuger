@@ -24,7 +24,7 @@ private:
 
     enum class Commands
     {
-        run, trace, setBP, delBP, disas, reg, chgMem, getMem, setReg
+        run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads
     };
 
     struct BreakPoint
@@ -34,12 +34,36 @@ private:
         BYTE saveByte; // Точка останова - один байт
     };
 
-    std::unordered_map<DWORD_PTR, BreakPoint> breakMap; // Используем DWORD_PTR
+    struct ExportedSymbol
+    {
+        std::string name;
+        DWORD_PTR address;
+    };
+
+    struct Module
+    {
+        std::string name;
+        DWORD_PTR baseAddress;
+        size_t size;
+        std::vector<ExportedSymbol> symbols;
+
+    };
+
+    struct ActiveThread {
+        DWORD threadId;
+        HANDLE hThread;
+        bool isRunning;
+    };
+
+    std::unordered_map<DWORD_PTR, BreakPoint> breakMap; 
     HANDLE hProcess;
     bool active = false;
     bool isRun = false;
     bool isTrace = false;
     Disassembler disas;
+    std::unordered_map<DWORD_PTR, Module> modules;
+    std::unordered_map<DWORD, ActiveThread> threads;
+    DWORD mainThreadId;
 
     bool createDebugProc(const std::string& prog);
     void debugRun();
@@ -72,7 +96,9 @@ private:
         {"edit", Commands::chgMem},
         {"reg", Commands::reg},
         {"disas", Commands::disas},
-        {"set", Commands::setReg}
+        {"modules", Commands::modules},  
+        {"threads", Commands::threads}    
+
     };
 
     std::unordered_map<std::string, size_t> dataSize =
@@ -93,6 +119,14 @@ private:
     void handleDisasCommand(std::istringstream& stream);
     void handleEditCommand(std::istringstream& stream);
     void handleRegCommand(std::istringstream& stream, CONTEXT& context);
+    void handleModulesCommand();
+    void handleThreadsCommand();
+
+    void handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info);
+    void handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr);
+    void handleCreateThread(DWORD pid, DWORD tid, CREATE_THREAD_DEBUG_INFO* info);
+    void handleExitThread(DWORD pid, DWORD tid, DWORD exitCode);
+    void handleCreateProcess(DWORD pid, DWORD tid, CREATE_PROCESS_DEBUG_INFO* info);
 
 public:
     void run(const std::string& prog);

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <functional>
 #include  <winnt.h>
+#include <psapi.h>
 
 namespace fs = std::filesystem;
 
@@ -254,31 +255,38 @@ void Debugger::debugRun()
         switch (debugEvent.dwDebugEventCode)
         {
         case CREATE_THREAD_DEBUG_EVENT:
-            std::cout << "Thread created: " << debugEvent.dwThreadId << std::endl;
+            handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
+            //std::cout << "Thread created: " << debugEvent.dwThreadId << std::endl;
             break;
         case EXIT_THREAD_DEBUG_EVENT:
-            std::cout << "Thread exited: " << debugEvent.dwThreadId << std::endl;
+            handleExitThread(debugEvent.dwProcessId, debugEvent.dwThreadId, debugEvent.u.ExitProcess.dwExitCode);
+            //std::cout << "Thread exited: " << debugEvent.dwThreadId << std::endl;
             break;
         case CREATE_PROCESS_DEBUG_EVENT:
-            std::cout << "Process created: " << debugEvent.dwProcessId << std::endl;
+            std::cout << "Process created: " << std::hex << debugEvent.dwProcessId << std::endl;
+            mainThreadId = debugEvent.dwThreadId;
+            handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
+            handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
             disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
             setBreakPoint((DWORD)entryPoint, BreakType::software);
             std::cout << "Entry point address: 0x" << std::hex << entryPoint << std::endl;
-            
-
-
             break;
+
         case EXIT_PROCESS_DEBUG_EVENT:
             std::cout << "Process exited: " << debugEvent.dwProcessId << std::endl;
             active = false;
             break;
         case LOAD_DLL_DEBUG_EVENT:
-            std::cout << "DLL loaded: " << debugEvent.u.LoadDll.lpBaseOfDll << std::endl;
+            handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
+            //std::cout << "DLL loaded: " << debugEvent.u.LoadDll.lpBaseOfDll << std::endl;
             break;
+
         case UNLOAD_DLL_DEBUG_EVENT:
+            handleUnloadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, reinterpret_cast<DWORD_PTR>(debugEvent.u.UnloadDll.lpBaseOfDll));
             std::cout << "DLL unloaded: " << debugEvent.u.UnloadDll.lpBaseOfDll << std::endl;
             break;
+
         case OUTPUT_DEBUG_STRING_EVENT:
             std::cout << "Debug string: " << debugEvent.u.DebugString.lpDebugStringData << std::endl;
             break;
@@ -423,6 +431,12 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
             break;
         case Commands::chgMem:
             handleEditCommand(iss);
+            break;
+        case Commands::modules:
+            handleModulesCommand();
+            break;
+        case Commands::threads:
+            handleThreadsCommand();
             break;
         default:
             std::cout << "Unknow commands" << std::endl;
@@ -635,11 +649,124 @@ void Debugger::handleRegCommand(std::istringstream& stream, CONTEXT& context)
 
     // Поиск и изменение регистра
     auto it = regMap.find(regName);
-    if (it != regMap.end()) {
+    if (it != regMap.end())
+    {
         it->second(context, value);
         std::cout << "Register " << regName << " updated to 0x" << std::hex << value << std::endl;
     }
-    else {
+    else
+    {
         std::cerr << "Unknown register: " << regName << "\n";
     }
+}
+
+void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
+{
+    auto it = threads.find(tid);
+    if (it != threads.end())
+    {
+        CloseHandle(it->second.hThread);
+        std::cout << "[-] Thread exited: TID=" << std::dec << tid
+            << ", ExitCode=" << exitCode << std::endl;
+        threads.erase(it);
+    }
+}
+
+void Debugger::handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr)
+{
+    auto it = modules.find(addr);
+    if (it != modules.end())
+    {
+        std::cout << "[-] DLL unloaded: " << it->second.name
+            << " @ 0x" << std::hex << addr << std::endl;
+        modules.erase(it);
+    }
+    else
+        std::cout << "[-] Unknown module unloaded @ 0x" << std::hex << addr << std::endl;
+}
+
+
+void Debugger::handleCreateThread(DWORD pid, DWORD tid, CREATE_THREAD_DEBUG_INFO* info)
+{
+    DWORD_PTR addres = (DWORD_PTR)info->lpStartAddress;
+    HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, tid);
+    threads[tid] = { tid, hThread, true };
+
+    std::cout << "[+] Thread created: TID=" << std::dec << tid
+        << " @ 0x" << std::hex << (DWORD_PTR)info->lpStartAddress << std::endl;
+
+}
+void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
+{
+    char moduleName[MAX_PATH] = { 0 };
+    DWORD_PTR baseAddr = (DWORD_PTR)info->lpBaseOfDll;
+
+    // Попробуем получить имя модуля
+    HANDLE hFile = info->hFile;
+    if (hFile != INVALID_HANDLE_VALUE && hFile != NULL) {
+        DWORD len = GetFinalPathNameByHandleA(hFile, moduleName, MAX_PATH, FILE_NAME_NORMALIZED);
+        if (len > 0 && len < MAX_PATH) {
+            // Убираем префикс типа "\\?\" или "\\.\"
+            char* nameStart = strstr(moduleName, "\\");
+            if (nameStart) {
+                char* lastSlash = strrchr(nameStart, '\\');
+                if (lastSlash) strcpy(moduleName, lastSlash + 1);
+            }
+        }
+    }
+
+    if (!moduleName[0]) {
+        sprintf(moduleName, "module_%p.dll", baseAddr);
+    }
+
+    MODULEINFO modInfo = { 0 };
+    if (GetModuleInformation(hProcess, (HMODULE)baseAddr, &modInfo, sizeof(modInfo))) {
+        modules[baseAddr] = {
+            std::string(moduleName),
+            baseAddr,
+            modInfo.SizeOfImage
+        };
+    }
+    else {
+        modules[baseAddr] = {
+            std::string(moduleName),
+            baseAddr,
+            0x1000,  // неизвестный размер
+        };
+    }
+
+    std::cout << "[+] DLL loaded: " << moduleName
+        << " @ 0x" << std::hex << baseAddr << std::endl;
+}
+
+
+void Debugger::handleModulesCommand()
+{
+    std::cout << "\nLoaded modules ("<< std::dec << modules.size() << "):" << std::endl;
+    std::cout << std::setw(18) << "Address" << " | " << std::setw(12) << "Size" << " | Name" << std::endl;
+    std::cout << std::string(50, '-') << std::endl;
+
+    for (const auto& [addr, mod] : modules) {
+        std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << addr
+            << " | " << std::dec << std::setw(10) << mod.size
+            << " | " << mod.name << std::endl;
+    }
+    std::cout << std::endl;
+}
+
+
+
+void Debugger::handleThreadsCommand()
+{
+    std::cout << "\nActive threads (" << threads.size() << "):" << std::endl;
+    std::cout << std::setw(8) << "TID" << " | " << std::setw(16) << "Handle" << " | Status" << std::endl;
+    std::cout << std::string(40, '-') << std::endl;
+
+    for (const auto& [tid, thread] : threads) {
+        std::cout << std::dec << std::setw(8) << tid
+            << " | 0x" << std::hex << std::setw(14) << std::setfill('0')
+            << reinterpret_cast<uintptr_t>(thread.hThread)
+            << " | " << (thread.isRunning ? "Running" : "Stopped") << std::endl;
+    }
+    std::cout << std::endl;
 }
