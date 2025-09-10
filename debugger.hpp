@@ -1,3 +1,5 @@
+#pragma once 
+
 #include <vector>
 #include <iostream>
 #include <udis86.h>
@@ -12,19 +14,35 @@ static const size_t lineSize = 16;
 class Debugger
 {
 private:
+
+    enum class Commands
+    {
+        run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads, syms
+    };
+    std::unordered_map<std::string, Debugger::Commands> commands =
+    {
+        {"run", Commands::run},
+        {"bp", Commands::setBP},
+        {"del", Commands::delBP},
+        {"g", Commands::trace},
+        {"dump", Commands::getMem},
+        {"edit", Commands::chgMem},
+        {"reg", Commands::reg},
+        {"disas", Commands::disas},
+        {"modules", Commands::modules},
+        {"threads", Commands::threads},
+        {"symbols", Commands::syms}
+
+    };
+
+
     enum class BreakState
     {
         disable, enable
     };
-
     enum class BreakType
     {
         software, hardware
-    };
-
-    enum class Commands
-    {
-        run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads
     };
 
     struct BreakPoint
@@ -64,6 +82,7 @@ private:
     std::unordered_map<DWORD_PTR, Module> modules;
     std::unordered_map<DWORD, ActiveThread> threads;
     DWORD mainThreadId;
+    DWORD_PTR exeBaseAddress;
 
     bool createDebugProc(const std::string& prog);
     void debugRun();
@@ -86,20 +105,7 @@ private:
     size_t eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exceptionDebugInfo);
     size_t breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr); // Используем DWORD_PTR
 
-    std::unordered_map<std::string, Debugger::Commands> commands =
-    {
-        {"run", Commands::run},
-        {"bp", Commands::setBP},
-        {"del", Commands::delBP},
-        {"g", Commands::trace},
-        {"dump", Commands::getMem},
-        {"edit", Commands::chgMem},
-        {"reg", Commands::reg},
-        {"disas", Commands::disas},
-        {"modules", Commands::modules},  
-        {"threads", Commands::threads}    
 
-    };
 
     std::unordered_map<std::string, size_t> dataSize =
     {
@@ -121,12 +127,15 @@ private:
     void handleRegCommand(std::istringstream& stream, CONTEXT& context);
     void handleModulesCommand();
     void handleThreadsCommand();
+    void handleSymbolsCommand();
+
 
     void handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info);
     void handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr);
     void handleCreateThread(DWORD pid, DWORD tid, CREATE_THREAD_DEBUG_INFO* info);
     void handleExitThread(DWORD pid, DWORD tid, DWORD exitCode);
     void handleCreateProcess(DWORD pid, DWORD tid, CREATE_PROCESS_DEBUG_INFO* info);
+    void handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint);
 
 public:
     void run(const std::string& prog);

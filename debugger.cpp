@@ -8,6 +8,7 @@
 #include <functional>
 #include  <winnt.h>
 #include <psapi.h>
+#include "pe.hpp"
 
 namespace fs = std::filesystem;
 
@@ -266,7 +267,8 @@ void Debugger::debugRun()
             std::cout << "Process created: " << std::hex << debugEvent.dwProcessId << std::endl;
             mainThreadId = debugEvent.dwThreadId;
             handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
-            handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
+            exeBaseAddress = (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpBaseOfImage;
+            handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpStartAddress);
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
             disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
             setBreakPoint((DWORD)entryPoint, BreakType::software);
@@ -321,8 +323,6 @@ void Debugger::debugRun()
     return;
 }
 
-
-
 size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
 {
     CONTEXT context;
@@ -342,7 +342,8 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
     disasDebugProc(exceptionAddr, 1);
 
     thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
-    if (thread != INVALID_HANDLE_VALUE) {
+    if (thread != INVALID_HANDLE_VALUE)
+    {
         context.ContextFlags = CONTEXT_ALL;
         GetThreadContext(thread, &context);
         if (it != breakMap.end()) 
@@ -401,7 +402,8 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
     iss >> cmd;
 
     auto it = commands.find(cmd);
-    if (it == commands.end()) {
+    if (it == commands.end())
+    {
         std::cerr << "Unknown command: " << cmd << "\n";
         return;
     }
@@ -438,6 +440,10 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
         case Commands::threads:
             handleThreadsCommand();
             break;
+
+        case Commands::syms:
+            handleSymbolsCommand();
+            break;
         default:
             std::cout << "Unknow commands" << std::endl;
             break;
@@ -453,43 +459,57 @@ void Debugger::handleTraceCommand()
 }
 
 
-DWORD getAddr(std::istringstream& stream)
+DWORD_PTR getAddr(std::istringstream& stream)
 {
-    DWORD addr;
-    stream >> std::hex >> addr;
+    std::string addrStr;
+    stream >> addrStr;
 
-    //if (!(stream >> std::hex >> addr))
-    //{
-    //    std::cerr << "Invalid address format. Expected hexadecimal value.\n";
-    //    return 0;
-    //}
-
-    if (addr > 0x7FFFFFFF)
-    {
-        std::cerr << "Address out of range: 0x" << std::hex << addr << "\n";
+    if (addrStr.empty()) {
+        std::cerr << "Address is missing.\n";
         return 0;
     }
-    return addr;
+
+    // Обрабатываем префикс 0x, если он есть
+    if (addrStr.size() > 2 && addrStr[0] == '0' && (addrStr[1] == 'x' || addrStr[1] == 'X')) {
+        addrStr = addrStr.substr(2);
+    }
+
+    try {
+        // Используем stoull для чтения 64-битного значения
+        size_t pos;
+        uint64_t addr = std::stoull(addrStr, &pos, 16);
+
+        // Проверяем, что вся строка была успешно прочитана
+        if (pos != addrStr.size()) {
+            std::cerr << "Invalid address format: " << addrStr << "\n";
+            return 0;
+        }
+
+        return static_cast<DWORD_PTR>(addr);
+    }
+    catch (...) {
+        std::cerr << "Invalid address format: " << addrStr << "\n";
+        return 0;
+    }
 }
 
 void Debugger::handleBpCommand(std::istringstream& stream)
 {
-    DWORD addr = getAddr(stream);
+    DWORD_PTR addr = getAddr(stream);
 
     setBreakPoint(addr, BreakType::software);
 
 }
 
-
 void Debugger::handleDelCommand(std::istringstream& stream)
 {
-    DWORD addr = getAddr(stream);
+    DWORD_PTR addr = getAddr(stream);
     deleteBreakPoint(addr);
 }
  
 void Debugger::handleDumpCommand(std::istringstream& stream)
 {
-    DWORD addr = getAddr(stream);
+    DWORD_PTR addr = getAddr(stream);
     printMemory(addr);
 }
 
@@ -502,7 +522,7 @@ void Debugger::handleDisasCommand(std::istringstream& stream)
 
 void  Debugger::handleEditCommand(std::istringstream& stream)
 {
-    DWORD addr = getAddr(stream);
+    DWORD_PTR addr = getAddr(stream);
     size_t size, value;
     std::string strSize;
     stream >> strSize;
@@ -527,10 +547,6 @@ void  Debugger::handleEditCommand(std::istringstream& stream)
 
 
 }
-
-
-
-
 
 
 
@@ -655,9 +671,7 @@ void Debugger::handleRegCommand(std::istringstream& stream, CONTEXT& context)
         std::cout << "Register " << regName << " updated to 0x" << std::hex << value << std::endl;
     }
     else
-    {
         std::cerr << "Unknown register: " << regName << "\n";
-    }
 }
 
 void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
@@ -701,39 +715,48 @@ void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
     char moduleName[MAX_PATH] = { 0 };
     DWORD_PTR baseAddr = (DWORD_PTR)info->lpBaseOfDll;
 
-    // Попробуем получить имя модуля
     HANDLE hFile = info->hFile;
-    if (hFile != INVALID_HANDLE_VALUE && hFile != NULL) {
+    if (hFile != INVALID_HANDLE_VALUE && hFile != NULL)
+    {
         DWORD len = GetFinalPathNameByHandleA(hFile, moduleName, MAX_PATH, FILE_NAME_NORMALIZED);
-        if (len > 0 && len < MAX_PATH) {
-            // Убираем префикс типа "\\?\" или "\\.\"
+        if (len > 0 && len < MAX_PATH)
+        {
             char* nameStart = strstr(moduleName, "\\");
-            if (nameStart) {
+            if (nameStart)
+            {
                 char* lastSlash = strrchr(nameStart, '\\');
                 if (lastSlash) strcpy(moduleName, lastSlash + 1);
             }
         }
     }
 
-    if (!moduleName[0]) {
+    if (!moduleName[0])
         sprintf(moduleName, "module_%p.dll", baseAddr);
-    }
+
+    PeHeader lib(baseAddr, hProcess);
+    std::vector<ExportedSymbol> syms;
+    for (auto& sym : lib.getExportedSymbols())
+        syms.push_back({ sym.first, sym.second });
+    
+    
 
     MODULEINFO modInfo = { 0 };
-    if (GetModuleInformation(hProcess, (HMODULE)baseAddr, &modInfo, sizeof(modInfo))) {
+    if (GetModuleInformation(hProcess, (HMODULE)baseAddr, &modInfo, sizeof(modInfo)))
         modules[baseAddr] = {
             std::string(moduleName),
             baseAddr,
-            modInfo.SizeOfImage
+            modInfo.SizeOfImage,
+            syms
         };
-    }
-    else {
+    
+    
+    else ///!!!
         modules[baseAddr] = {
             std::string(moduleName),
             baseAddr,
             0x1000,  // неизвестный размер
+            syms
         };
-    }
 
     std::cout << "[+] DLL loaded: " << moduleName
         << " @ 0x" << std::hex << baseAddr << std::endl;
@@ -762,11 +785,53 @@ void Debugger::handleThreadsCommand()
     std::cout << std::setw(8) << "TID" << " | " << std::setw(16) << "Handle" << " | Status" << std::endl;
     std::cout << std::string(40, '-') << std::endl;
 
-    for (const auto& [tid, thread] : threads) {
+    for (const auto& [tid, thread] : threads)
+    {
         std::cout << std::dec << std::setw(8) << tid
             << " | 0x" << std::hex << std::setw(14) << std::setfill('0')
             << reinterpret_cast<uintptr_t>(thread.hThread)
             << " | " << (thread.isRunning ? "Running" : "Stopped") << std::endl;
     }
     std::cout << std::endl;
+}
+
+void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint)
+{
+    
+
+    // Попробуем прочитать DOS-заголовок
+    try {
+        PeHeader pe(baseAddr, hProcess);
+
+        std::cout << "EXE Base: 0x" << std::hex << baseAddr << std::endl;
+
+        if (pe.hasExports())
+        {
+            std::vector<ExportedSymbol> syms;
+            for (auto& sym : pe.getExportedSymbols())
+                syms.push_back({ sym.first, sym.second });
+            modules[baseAddr] = { name, baseAddr, 0X1000, syms };
+            std::cout << "Found " << syms.size() << " exports in EXE" << std::endl;
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Failed to read EXE headers: " << e.what() << std::endl;
+    }
+
+    std::cout << "[+] EXE loaded: " << name << " @ 0x" << std::hex << baseAddr
+        << ", Entry: 0x" << entryPoint << std::endl;
+}
+
+
+void Debugger::handleSymbolsCommand()
+{
+    for (auto& [modAddr, mod] : modules)
+    {
+        std::cout << "\n" << mod.name << ":\n";
+        std::cout << std::string(60, '-') << std::endl;
+
+        for (const auto& [symbol, addr] : mod.symbols)
+            std::cout << "  " << std::setw(40) << std::left << symbol
+                << " = 0x" << std::hex << addr << std::endl;
+    }
 }

@@ -19,12 +19,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="argh.h" />
     <ClInclude Include="debugger.hpp" />
     <ClInclude Include="disas.hpp" />
+    <ClInclude Include="pe.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="debugger.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="pe.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D2B65181-5B58-4E3F-BC59-527E4E554311}</ProjectGuid>
