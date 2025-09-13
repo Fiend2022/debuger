@@ -60,7 +60,6 @@ private:
 
     struct Module
     {
-        std::string name;
         DWORD_PTR baseAddress;
         size_t size;
         std::vector<ExportedSymbol> symbols;
@@ -73,13 +72,14 @@ private:
         bool isRunning;
     };
 
+    std::vector<ExportedSymbol> fullExport;
     std::unordered_map<DWORD_PTR, BreakPoint> breakMap; 
     HANDLE hProcess;
     bool active = false;
     bool isRun = false;
     bool isTrace = false;
     Disassembler disas;
-    std::unordered_map<DWORD_PTR, Module> modules;
+    std::unordered_map<std::string, Module> modules;
     std::unordered_map<DWORD, ActiveThread> threads;
     DWORD mainThreadId;
     DWORD_PTR exeBaseAddress;
@@ -136,6 +136,11 @@ private:
     void handleExitThread(DWORD pid, DWORD tid, DWORD exitCode);
     void handleCreateProcess(DWORD pid, DWORD tid, CREATE_PROCESS_DEBUG_INFO* info);
     void handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint);
+
+    bool parseSymbols(const std::string& arg, std::string& dll, std::string& symbol);
+    DWORD_PTR getArgAddr(const std::string& arg);
+
+    std::vector<ExportedSymbol> loadSyms(const std::vector<std::pair<std::string, DWORD_PTR>>&);
 
 public:
     void run(const std::string& prog);

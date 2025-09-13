@@ -112,9 +112,7 @@ void Debugger::deleteBreakPoint(DWORD_PTR addr)
         breakMap.erase(it);
     }
     else 
-    {
         std::cerr << "No breakpoint found at 0x" << std::hex << addr << std::endl;
-    }
 
 }
 
@@ -488,35 +486,53 @@ DWORD_PTR getAddr(std::istringstream& stream)
         return static_cast<DWORD_PTR>(addr);
     }
     catch (...) {
-        std::cerr << "Invalid address format: " << addrStr << "\n";
+        //std::cerr << "Invalid address format: " << addrStr << "\n";
         return 0;
     }
 }
 
+
+std::vector<Debugger::ExportedSymbol> Debugger::loadSyms(const std::vector<std::pair<std::string, DWORD_PTR>>& expSyms)
+{
+    std::vector<ExportedSymbol> syms;
+    for (auto& sym : expSyms)
+    {
+        syms.push_back({ sym.first, sym.second });
+        fullExport.push_back({ sym.first, sym.second });
+    }
+    return syms;
+}
+
 void Debugger::handleBpCommand(std::istringstream& stream)
 {
-    DWORD_PTR addr = getAddr(stream);
-
+    std::string arg;
+    stream >> arg;
+    DWORD_PTR addr = getArgAddr(arg);
     setBreakPoint(addr, BreakType::software);
-
 }
 
 void Debugger::handleDelCommand(std::istringstream& stream)
 {
-    DWORD_PTR addr = getAddr(stream);
+    std::string arg;
+    stream >> arg;
+    DWORD_PTR addr = getArgAddr(arg);
     deleteBreakPoint(addr);
 }
  
 void Debugger::handleDumpCommand(std::istringstream& stream)
 {
-    DWORD_PTR addr = getAddr(stream);
+    std::string arg;
+    stream >> arg;
+    DWORD_PTR addr = getArgAddr(arg);
     printMemory(addr);
 }
 
 
 void Debugger::handleDisasCommand(std::istringstream& stream)
 {
-    DWORD_PTR addr = getAddr(stream);
+    std::string arg;
+    stream >> arg;
+    DWORD_PTR addr = getArgAddr(arg);
     disasDebugProc(addr);
 }
 
@@ -688,10 +704,16 @@ void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
 
 void Debugger::handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr)
 {
-    auto it = modules.find(addr);
+    auto it = modules.begin();
+    while (it != modules.end())
+    {
+        if (it->second.baseAddress == addr)
+            break;
+        it++;
+    }
     if (it != modules.end())
     {
-        std::cout << "[-] DLL unloaded: " << it->second.name
+        std::cout << "[-] DLL unloaded: " << it->first
             << " @ 0x" << std::hex << addr << std::endl;
         modules.erase(it);
     }
@@ -725,7 +747,8 @@ void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
             if (nameStart)
             {
                 char* lastSlash = strrchr(nameStart, '\\');
-                if (lastSlash) strcpy(moduleName, lastSlash + 1);
+                if (lastSlash)
+                    strcpy(moduleName, lastSlash + 1);
             }
         }
     }
@@ -734,29 +757,21 @@ void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
         sprintf(moduleName, "module_%p.dll", baseAddr);
 
     PeHeader lib(baseAddr, hProcess);
-    std::vector<ExportedSymbol> syms;
-    for (auto& sym : lib.getExportedSymbols())
-        syms.push_back({ sym.first, sym.second });
-    
-    
-
+    std::vector<ExportedSymbol> syms = loadSyms(lib.getExportedSymbols());
     MODULEINFO modInfo = { 0 };
+    size_t size;
+
     if (GetModuleInformation(hProcess, (HMODULE)baseAddr, &modInfo, sizeof(modInfo)))
-        modules[baseAddr] = {
-            std::string(moduleName),
-            baseAddr,
-            modInfo.SizeOfImage,
-            syms
-        };
-    
-    
-    else ///!!!
-        modules[baseAddr] = {
-            std::string(moduleName),
-            baseAddr,
-            0x1000,  // неизвестный размер
-            syms
-        };
+        size = modInfo.SizeOfImage;
+    else
+        size = 0x1000;
+
+
+    modules[std::string(moduleName)] = {
+        baseAddr,
+        size,
+        syms
+    };
 
     std::cout << "[+] DLL loaded: " << moduleName
         << " @ 0x" << std::hex << baseAddr << std::endl;
@@ -769,10 +784,10 @@ void Debugger::handleModulesCommand()
     std::cout << std::setw(18) << "Address" << " | " << std::setw(12) << "Size" << " | Name" << std::endl;
     std::cout << std::string(50, '-') << std::endl;
 
-    for (const auto& [addr, mod] : modules) {
-        std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << addr
+    for (const auto& [name, mod] : modules) {
+        std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << mod.baseAddress
             << " | " << std::dec << std::setw(10) << mod.size
-            << " | " << mod.name << std::endl;
+            << " | " << name << std::endl;
     }
     std::cout << std::endl;
 }
@@ -807,10 +822,8 @@ void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_
 
         if (pe.hasExports())
         {
-            std::vector<ExportedSymbol> syms;
-            for (auto& sym : pe.getExportedSymbols())
-                syms.push_back({ sym.first, sym.second });
-            modules[baseAddr] = { name, baseAddr, 0X1000, syms };
+            std::vector<ExportedSymbol> syms = loadSyms(pe.getExportedSymbols());
+            modules[name] = { baseAddr, 0x1000, syms };
             std::cout << "Found " << syms.size() << " exports in EXE" << std::endl;
         }
     }
@@ -825,13 +838,56 @@ void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_
 
 void Debugger::handleSymbolsCommand()
 {
-    for (auto& [modAddr, mod] : modules)
+    for (auto& [name, mod] : modules)
     {
-        std::cout << "\n" << mod.name << ":\n";
+        std::cout << "\n" << name << ":\n";
         std::cout << std::string(60, '-') << std::endl;
 
         for (const auto& [symbol, addr] : mod.symbols)
             std::cout << "  " << std::setw(40) << std::left << symbol
                 << " = 0x" << std::hex << addr << std::endl;
+    }
+}
+
+
+
+bool Debugger::parseSymbols(const std::string& arg, std::string& dll, std::string& symbol)
+{
+    auto pos = arg.find('!');
+    if (pos != std::string::npos)
+    {
+        dll = arg.substr(0, pos);
+        symbol = arg.substr(pos+1);
+    }
+    else
+    {
+        symbol = arg;
+        return false;
+    }
+
+}
+
+DWORD_PTR Debugger::getArgAddr(const std::string& arg)
+{
+    try
+    {
+        DWORD_PTR addr = getAddr(std::istringstream(arg));
+        
+        if(addr != 0)
+            return addr;
+    }
+    catch (...){}
+    std::string dll, symbol;
+    if (parseSymbols(arg, dll, symbol))
+    {
+        for (auto& func : modules[dll + ".dll"].symbols)
+            if (func.name == symbol)
+                return func.address;
+    }
+    else
+    {
+        for (auto& func : fullExport)
+            if (func.name == symbol)
+                return func.address;
     }
 }

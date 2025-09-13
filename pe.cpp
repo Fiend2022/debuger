@@ -42,8 +42,8 @@ void PeHeader::loadSections()
     WORD numberOfSections = ntHeader.FileHeader.NumberOfSections;
     sections.resize(numberOfSections);
 
-    if (!readMemory(sectionHeaderAddress, sections.data(),
-        numberOfSections * sizeof(IMAGE_SECTION_HEADER))) {
+    if (!readMemory(sectionHeaderAddress, sections.data(), numberOfSections * sizeof(IMAGE_SECTION_HEADER)))
+    {
         throw std::runtime_error("Failed to read section headers");
     }
 }
@@ -57,6 +57,7 @@ void PeHeader::loadExport()
         return;
     }
 
+
     exportDirectory = new IMAGE_EXPORT_DIRECTORY();
     DWORD_PTR exportRva = dataDir.VirtualAddress;
     DWORD_PTR exportVa = rvaToVa(exportRva);
@@ -67,99 +68,7 @@ void PeHeader::loadExport()
     }
 
     hasExport = true;
-}
 
-
-
-//void PeHeader::loadImport()
-//{
-//    auto& impDirEntry = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-//    if (impDirEntry.VirtualAddress == 0 || impDirEntry.Size == 0) {
-//        hasImport = false;
-//        return;
-//    }
-//
-//    DWORD_PTR impRva = impDirEntry.VirtualAddress;
-//    DWORD_PTR impVa = rvaToVa(impRva);
-//
-//    IMAGE_IMPORT_DESCRIPTOR desc;
-//    int i = 0;
-//
-//    while (true) {
-//        if (!readMemory(impVa + i * sizeof(IMAGE_IMPORT_DESCRIPTOR), &desc, sizeof(desc))) {
-//            break;
-//        }
-//
-//        if (desc.Name == 0 && desc.FirstThunk == 0) {
-//            break;
-//        }
-//
-//        char dllName[256] = { 0 };
-//        if (!readMemory(base + desc.Name, dllName, sizeof(dllName))) {
-//            i++;
-//            continue;
-//        }
-//
-//        char* ext = strrchr(dllName, '.');
-//        if (ext) *ext = '\0';
-//
-//        DWORD_PTR thunkRva = desc.FirstThunk;
-//        while (true) {
-//            IMAGE_THUNK_DATA64 thunk;
-//            if (!readMemory(base + thunkRva, &thunk, sizeof(thunk)) ||
-//                thunk.u1.AddressOfData == 0) {
-//                break;
-//            }
-//
-//            if (IMAGE_SNAP_BY_ORDINAL(thunk.u1.Ordinal)) {
-//                std::stringstream ss;
-//                ss << "#" << IMAGE_ORDINAL(thunk.u1.Ordinal);
-//                importedSymbols.emplace_back(dllName, ss.str());
-//            }
-//            else {
-//                IMAGE_IMPORT_BY_NAME importByName;
-//                if (readMemory(base + thunk.u1.AddressOfData, &importByName, sizeof(importByName))) {
-//                    std::string symbolName(reinterpret_cast<char*>(&importByName.Name));
-//                    importedSymbols.emplace_back(dllName, symbolName);
-//                }
-//            }
-//            thunkRva += sizeof(IMAGE_THUNK_DATA64);
-//        }
-//        i++;
-//    }
-//
-//    hasImport = true;
-//}
-
-
-
-PeHeader::PeHeader(DWORD_PTR moduleBase, HANDLE _hProc)
-	: hProc(_hProc), base(moduleBase)
-{
-	loadDosHeader();
-	loadNtHeader();
-	loadSections();
-	loadExport();
-	//loadImport();
-}
-
-
-const IMAGE_SECTION_HEADER* PeHeader::getSectionByName(const char* name) const {
-    for (const auto& section : sections)
-        if (strncmp(reinterpret_cast<const char*>(section.Name), name, 8) == 0)
-            return &section;
-    return nullptr;
-}
-
-const IMAGE_EXPORT_DIRECTORY* PeHeader::getExportDirectory() const {
-    return hasExport ? exportDirectory : nullptr;
-}
-
-std::vector<std::pair<std::string, DWORD_PTR>> PeHeader::getExportedSymbols() {
-    std::vector<std::pair<std::string, DWORD_PTR>> symbols;
-
-    if (!hasExport)
-        return symbols;
 
     // Читаем таблицы
     std::vector<DWORD> addressOfFunctions(exportDirectory->NumberOfFunctions);
@@ -176,7 +85,7 @@ std::vector<std::pair<std::string, DWORD_PTR>> PeHeader::getExportedSymbols() {
         throw std::runtime_error("Failed to read export tables");
     }
 
-    for (DWORD i = 0; i < exportDirectory->NumberOfNames; i++){
+    for (DWORD i = 0; i < exportDirectory->NumberOfNames; i++) {
         char nameBuffer[256] = { 0 };
         DWORD_PTR nameRva = addressOfNames[i];
         DWORD_PTR nameVa = rvaToVa(nameRva);
@@ -191,6 +100,37 @@ std::vector<std::pair<std::string, DWORD_PTR>> PeHeader::getExportedSymbols() {
         }
     }
 
+}
+
+PeHeader::PeHeader(DWORD_PTR moduleBase, HANDLE _hProc)
+     : hProc(_hProc), base(moduleBase)
+{
+    loadDosHeader();
+    loadNtHeader();
+    loadSections();
+    loadExport();
+}
+
+
+
+
+
+const IMAGE_SECTION_HEADER* PeHeader::getSectionByName(const char* name) const
+{
+    for (const auto& section : sections)
+        if (strncmp(reinterpret_cast<const char*>(section.Name), name, 8) == 0)
+            return &section;
+    return nullptr;
+}
+
+const IMAGE_EXPORT_DIRECTORY* PeHeader::getExportDirectory() const
+{
+    return hasExport ? exportDirectory : nullptr;
+}
+
+std::vector<std::pair<std::string, DWORD_PTR>> PeHeader::getExportedSymbols()
+{
+    
     return symbols;
 }
 
@@ -199,9 +139,11 @@ std::vector<std::pair<std::string, DWORD_PTR>> PeHeader::getExportedSymbols() {
 
 DWORD_PTR PeHeader::rvaToVa(DWORD rva)
 {
-    for (const auto& section : sections) {
+    for (const auto& section : sections)
+    {
         if (rva >= section.VirtualAddress &&
-            rva < section.VirtualAddress + section.Misc.VirtualSize) {
+            rva < section.VirtualAddress + section.Misc.VirtualSize)
+        {
             return base + rva;
         }
     }

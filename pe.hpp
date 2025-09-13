@@ -11,7 +11,7 @@ class PeHeader {
 
 
 private:
-    char* filename;     
+   std::string name;     
 
     HANDLE              fd;             
     HANDLE              mapd;           
@@ -56,21 +56,18 @@ public:
 
     PeHeader(DWORD_PTR moduledBase, HANDLE _hProc);
 
-
-    const std::vector<IMAGE_SECTION_HEADER>& getSections() const { return sections; }
+    const std::vector<IMAGE_SECTION_HEADER>& getSections() { return sections; }
     const IMAGE_SECTION_HEADER* getSectionByName(const char* name) const;
     
+    std::vector<std::pair<std::string, DWORD_PTR>> symbols;
+
 
     bool hasExports() const { return hasExport; }
     const IMAGE_EXPORT_DIRECTORY* getExportDirectory() const;
     std::vector<std::pair<std::string, DWORD_PTR>> getExportedSymbols();
 
-    //const std::vector<std::pair<std::string, DWORD_PTR>>& PeHeader::getImportedSymbols() const {
-    //    return importedSymbols;
-    //}
-
-    //bool hasImports() const { return hasImport; }
-    //const std::vector<IMAGE_IMPORT_DESCRIPTOR>& getImportDescriptors() const { return importDescriptors; }
+    std::string getName() const { return name; }
+    DWORD_PTR getBase () const { return base; }
     
 };
 
