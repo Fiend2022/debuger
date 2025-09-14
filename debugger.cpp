@@ -12,6 +12,14 @@
 
 namespace fs = std::filesystem;
 
+template<typename T>
+std::string to_hex(T value)
+{
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0') << std::setw(sizeof(T) * 2) << value;
+    return ss.str();
+}
+
 bool Debugger::createDebugProc(const std::string& prog)
 {
     if (!fs::exists(prog)) 
@@ -90,7 +98,7 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
     return offset;
 }
 
-void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type)
+void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type = BreakType::software)
 {
     auto it = breakMap.find(addr);
     if (it == breakMap.end())
@@ -208,7 +216,7 @@ void Debugger::printMemory(DWORD_PTR addr, size_t size=128)
     }
 }
 
-void Debugger::changeMemory(DWORD_PTR addr, size_t value, size_t size = 4)
+void Debugger::changeMemory(DWORD_PTR addr, void* value, size_t size)
 {
     MEMORY_BASIC_INFORMATION mbi;
     if (VirtualQueryEx(hProcess, (PVOID)addr, &mbi, sizeof(mbi)) == 0) 
@@ -218,25 +226,30 @@ void Debugger::changeMemory(DWORD_PTR addr, size_t value, size_t size = 4)
         throw std::runtime_error(errorMsg);
     }
 
-    //if (mbi.Protect == PAGE_EXECUTE_READWRITE || mbi.Protect == PAGE_EXECUTE_WRITECOPY
-    //    || mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_WRITECOPY)
+    bool isWritable = false;
+    switch (mbi.Protect)
+    {
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+            isWritable = true;
+            break;
+        default:
+            isWritable = false;
+    }
 
-        if (!WriteProcessMemory(hProcess, (PVOID)addr, &value, size, nullptr)) 
-        {
-            DWORD error = GetLastError();
-            std::string errorMsg = "FAILED WRITE MEMORY: Error code " + std::to_string(error);
-            throw std::runtime_error(errorMsg);
-        }
-    
-
-    //else
-    //{
-    //    std::string errorMsg = "FAILED WRITE MEMORY: Writng to addres" 
-    //        + std::to_string(reinterpret_cast<uintptr_t>(addr)) + " is not permitted.";
-    //    throw std::runtime_error(errorMsg);
-    //}
+    if (!isWritable)
+        throw std::runtime_error("Cannot write to address 0x" + to_hex(addr) +
+            ": protection = 0x" + to_hex(mbi.Protect));
 
 
+    if (!WriteProcessMemory(hProcess, (PVOID)addr, value, size, nullptr)) 
+    {
+        DWORD error = GetLastError();
+        std::string errorMsg = "FAILED WRITE MEMORY: Error code " + std::to_string(error);
+        throw std::runtime_error(errorMsg);
+    }
 }
 
 
@@ -250,6 +263,8 @@ void Debugger::debugRun()
         LPTHREAD_START_ROUTINE entryPoint;
         if (!WaitForDebugEvent(&debugEvent, INFINITE))
             break;
+
+        currentThread = debugEvent.dwThreadId;
 
         switch (debugEvent.dwDebugEventCode)
         {
@@ -271,6 +286,7 @@ void Debugger::debugRun()
             disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
             setBreakPoint((DWORD)entryPoint, BreakType::software);
             std::cout << "Entry point address: 0x" << std::hex << entryPoint << std::endl;
+            initComands();
             break;
 
         case EXIT_PROCESS_DEBUG_EVENT:
@@ -399,55 +415,13 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
     std::string cmd;
     iss >> cmd;
 
-    auto it = commands.find(cmd);
-    if (it == commands.end())
+    auto it = std::find_if(commands.begin(), commands.end(), [cmd](CommandInfo elem) {return elem.name == cmd; });
+
+    if (it != commands.end())
     {
-        std::cerr << "Unknown command: " << cmd << "\n";
-        return;
+        it->handler(*this, iss);
     }
 
-    switch (commands[cmd])
-    {
-        case Commands::run:
-            isRun = true;
-            break;
-        case Commands::trace:
-            handleTraceCommand();
-            break;
-        case Commands::setBP:
-            handleBpCommand(iss);
-            break;
-        case Commands::delBP:
-            handleDelCommand(iss);
-            break;
-        case Commands::disas:
-            handleDisasCommand(iss);
-            break;
-        case Commands::getMem:
-            handleDumpCommand(iss);
-            break;
-        case Commands::reg:
-            handleRegCommand(iss, cont);
-            break;
-        case Commands::chgMem:
-            handleEditCommand(iss);
-            break;
-        case Commands::modules:
-            handleModulesCommand();
-            break;
-        case Commands::threads:
-            handleThreadsCommand();
-            break;
-
-        case Commands::syms:
-            handleSymbolsCommand();
-            break;
-        default:
-            std::cout << "Unknow commands" << std::endl;
-            break;
-
-
-    }
 
 }
 
@@ -552,7 +526,7 @@ void  Debugger::handleEditCommand(std::istringstream& stream)
             std::cerr << "Invalid value format. Expected hexadecimal value.\n";
             return;
         }
-        changeMemory(addr, value, dataSize[strSize]);
+        changeMemory(addr, &value, dataSize[strSize]);
     }
     else
     {
@@ -873,8 +847,9 @@ DWORD_PTR Debugger::getArgAddr(const std::string& arg)
     {
         DWORD_PTR addr = getAddr(std::istringstream(arg));
         
-        if(addr != 0)
+        if (addr != 0)
             return addr;
+
     }
     catch (...){}
     std::string dll, symbol;
@@ -890,4 +865,269 @@ DWORD_PTR Debugger::getArgAddr(const std::string& arg)
             if (func.name == symbol)
                 return func.address;
     }
+    return 0;
+}
+
+
+Debugger::CommandArgs Debugger::parseArgs(std::istringstream& stream)
+{
+    CommandArgs args;
+    if (!(stream >> args.addressArg))
+    {
+        args.valid = false;
+        return args;
+    }
+
+    args.address = getArgAddr(args.addressArg);
+    if (!args.address)
+    {
+        std::cerr << "Invalid address: " << args.addressArg << "\n";
+        args.valid = false;
+        return args;
+    }
+
+    if (args.addressArg == "-h" || args.addressArg == "--help")
+    {
+        args.helpRequested = true;
+        return args;
+    }
+
+    std::string token;
+    while (stream >> token)
+    {
+        if (token == "-n" || token == "--number")
+            if (!(stream >> args.count) || args.count <= 0)
+            {
+                std::cerr << "Invalid count\n";
+                args.valid = false;
+            }
+        
+
+        if (token == "-t" || token == "--type")
+            if (!(stream >> args.type))
+            {
+                std::cerr << "Expected type after " << token <<"\n";
+                args.valid = false;
+            }
+        
+        if (token == "-v" || token == "--value")
+            if (!(stream >> args.value))
+            {
+                std::cerr << "Expected value\n";
+                args.valid = false;
+            }
+
+    }
+    return args;
+}
+
+void Debugger::initComands()
+{
+    commands =
+    {
+        {"disas",
+         "disas <addr> [-n <count>]",
+        [](Debugger& dbg, std::istringstream& stream)
+            {
+                CommandArgs args = dbg.parseArgs(stream);
+                if (!args.valid) return;
+
+                if (args.helpRequested)
+                {
+                    std::cout << "Use: disas <addr> [-n <count>]" << std::endl;
+                    return;
+                }
+
+                DWORD_PTR addr = dbg.getArgAddr(args.addressArg);
+                if (!addr)
+                {
+                    std::cerr << "Invalid address: " << args.addressArg << "\n";
+                    return;
+                }
+
+                dbg.disasDebugProc(addr, args.count);
+            }
+        },
+
+        {
+            "bp",
+            "bp <addres> [-t hw|hww|hwr]",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                std::vector<std::string> types = { "hw", "hww", "hwr"};
+                CommandArgs args = dbg.parseArgs(stream);
+                if (!args.valid) return;
+
+                if (args.helpRequested)
+                {
+                    std::cout << "Use: bp <addres> [-t hw|hww|hwr]" << std::endl;
+                    return;
+                }
+                if (args.type == "d")
+                    dbg.setBreakPoint(args.address);
+            }
+        },
+
+        {
+            "dump",
+            "dump <addr|symbol|reg> [-n <count>] [-t <byte|word|dword]",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    std::vector<std::string> types = { "byte", "word", "dword"};
+                    CommandArgs args = dbg.parseArgs(stream);
+                    if (!args.valid) return;
+
+                    if (args.helpRequested)
+                    {
+                        std::cout << "Use: dump <addr|symbol|reg> [-n <count>] [-t <byte|word|dword]" << std::endl;
+                        return;
+                    }
+
+                    dbg.printMemory(args.address, args.count);
+
+                }
+
+        },
+
+        {
+            "edit",
+            "edit <addr|symbol|reg> [-t <byte|word|dword|string|mnemonic>] -v <value>",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    std::vector<std::string> types = { "byte", "word", "dword", "string"};
+                    CommandArgs args = dbg.parseArgs(stream);
+                    if (!args.valid) return;
+
+                    if (args.helpRequested)
+                    {
+                        std::cout << "Use: edit <addr|symbol|reg> [-t <db|dw|dd|qd|str>]" << std::endl;
+                        return;
+                    }
+
+                    std::vector<BYTE> data(args.value.begin(), args.value.end());
+
+                    auto it = dbg.dataSize.find(args.type);
+                    if (it != dbg.dataSize.end())
+                        dbg.changeMemory(args.address, data.data(), dbg.dataSize[args.type]);
+                    
+                    else if (args.type == "str")
+                    {
+                        data.push_back('\0');
+                        dbg.changeMemory(args.address, data.data(), data.size());
+                    }
+                    else
+                    {
+                        std::cout << "Error: incorrect data type" << std::endl;
+                        return;
+                    }
+
+                    return;
+
+                }
+        },
+
+        { 
+            "del",
+            "del <address|symbol|reg>",    
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    CommandArgs args = dbg.parseArgs(stream);
+                    if (!args.valid) return;
+
+                    if (args.helpRequested)
+                    {
+                        std::cout << "Use: del <address|symbol|reg>" << std::endl;
+                        return;
+                    }
+
+                    dbg.deleteBreakPoint(args.address);
+                }
+        },
+
+        {
+            "reg",
+            "reg <reg> <value>",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    std::string reg;
+                    CONTEXT context;
+                    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, dbg.currentThread);
+
+                    if (thread != INVALID_HANDLE_VALUE)
+                    {
+                        context.ContextFlags = CONTEXT_ALL;
+                        GetThreadContext(thread, &context);
+                        dbg.handleRegCommand(stream, context);
+                    }
+                   
+                }
+
+        },
+
+        {
+            "run",
+            "run",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    dbg.isRun = true;
+                    return;
+                }
+
+        },
+
+        {
+            "trace",
+            "trace",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    dbg.handleTraceCommand();
+                }
+        },
+
+        {
+            "modules",
+            "modules",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    dbg.handleModulesCommand();
+                }
+
+        },
+
+        {
+            "threads",
+            "threads",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    dbg.handleThreadsCommand();
+                }
+
+        },
+
+        {
+            "symbols",
+            "symbols",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    dbg.handleSymbolsCommand();
+                }
+        },
+
+        {
+            "bplist",
+            "bplist",
+            [](Debugger& dbg, std::istringstream& stream)
+                {
+                    size_t n = 0;
+                    for (auto& [addr, bp] : dbg.breakMap)
+                    {   
+                        std::string type = (bp.type == BreakType::software) ? "soft" : "hard";
+                        std::cout << n << ") " << type << ": ";
+                        dbg.disasDebugProc(addr, 1);
+                        n++;
+                    }
+                }
+
+        }
+    };
 }

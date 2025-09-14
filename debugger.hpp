@@ -8,33 +8,46 @@
 #include <string>
 #include "disas.hpp"
 #include <sstream>
+#include <functional>
 
 static const size_t lineSize = 16;
+
+
+
 
 class Debugger
 {
 private:
 
-    enum class Commands
-    {
-        run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads, syms
-    };
-    std::unordered_map<std::string, Debugger::Commands> commands =
-    {
-        {"run", Commands::run},
-        {"bp", Commands::setBP},
-        {"del", Commands::delBP},
-        {"g", Commands::trace},
-        {"dump", Commands::getMem},
-        {"edit", Commands::chgMem},
-        {"reg", Commands::reg},
-        {"disas", Commands::disas},
-        {"modules", Commands::modules},
-        {"threads", Commands::threads},
-        {"symbols", Commands::syms}
+    //enum class Commands
+    //{
+    //    run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads, syms
+    //};
+    //std::unordered_map<std::string, Debugger::Commands> commands =
+    //{
+    //    {"run", Commands::run},
+    //    {"bp", Commands::setBP},
+    //    {"del", Commands::delBP},
+    //    {"g", Commands::trace},
+    //    {"dump", Commands::getMem},
+    //    {"edit", Commands::chgMem},
+    //    {"reg", Commands::reg},
+    //    {"disas", Commands::disas},
+    //    {"modules", Commands::modules},
+    //    {"threads", Commands::threads},
+    //    {"symbols", Commands::syms}
 
+    //};
+
+
+    struct CommandInfo
+    {
+        std::string name;
+        std::string usage;
+        std::function<void(Debugger&, std::istringstream&)> handler;
     };
 
+    std::vector<CommandInfo> commands;
 
     enum class BreakState
     {
@@ -51,6 +64,9 @@ private:
         BreakType type;
         BYTE saveByte; // Точка останова - один байт
     };
+
+
+
 
     struct ExportedSymbol
     {
@@ -84,6 +100,7 @@ private:
     DWORD mainThreadId;
     DWORD_PTR exeBaseAddress;
 
+    DWORD currentThread;
     bool createDebugProc(const std::string& prog);
     void debugRun();
 
@@ -100,7 +117,7 @@ private:
     // Используем DWORD_PTR для адресов памяти
     void printMemory(DWORD_PTR addr, size_t size);
     std::vector<BYTE> getDumpMemory(DWORD_PTR addr, size_t size);
-    void changeMemory(DWORD_PTR addr, size_t value, size_t size);
+    void changeMemory(DWORD_PTR addr, void* value, size_t size);
 
     size_t eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exceptionDebugInfo);
     size_t breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr); // Используем DWORD_PTR
@@ -109,12 +126,13 @@ private:
 
     std::unordered_map<std::string, size_t> dataSize =
     {
-        {"db", 1},
-        {"dw", 2},
-        {"dd", 4},
+        {"db", sizeof(BYTE)},
+        {"dw", sizeof(WORD)},
+        {"dd", sizeof(DWORD)},
         #ifdef _WIN64
         {"dq", 8} // Добавляем 64-битный размер данных только для 64-битной сборки
         #endif
+        
     };
 
     void commandLine(const std::string& command, CONTEXT& cont);
@@ -141,6 +159,23 @@ private:
     DWORD_PTR getArgAddr(const std::string& arg);
 
     std::vector<ExportedSymbol> loadSyms(const std::vector<std::pair<std::string, DWORD_PTR>>&);
+
+
+
+    struct CommandArgs
+    {
+        std::string addressArg;
+        DWORD_PTR address;
+        int count = 10;
+        std::string type = "d";
+        std::string value = "d";
+        bool helpRequested = false;
+        bool valid = true;
+    };
+
+
+    void initComands();
+    CommandArgs parseArgs(std::istringstream& stream);
 
 public:
     void run(const std::string& prog);
