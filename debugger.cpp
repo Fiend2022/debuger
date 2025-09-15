@@ -7,8 +7,10 @@
 #include <sstream>
 #include <functional>
 #include  <winnt.h>
+#include <Windows.h>
 #include <psapi.h>
 #include "pe.hpp"
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -131,16 +133,16 @@ void Debugger::printRegisters(const CONTEXT& context)
 #ifdef _WIN64
     // 64-битные регистры
     std::cout
-        << "rax = " << std::setw(8) << context.Rax << " "
-        << "rbx = " << std::setw(8) << context.Rbx << " "
-        << "rcx = " << std::setw(8) << context.Rcx << " "
-        << "rdx = " << std::setw(8) << context.Rdx << "\n"
-        << "rsi = " << std::setw(8) << context.Rsi << " "
-        << "rdi = " << std::setw(8) << context.Rdi << " "
-        << "rbp = " << std::setw(8) << context.Rbp << " "
-        << "rsp = " << std::setw(8) << context.Rsp << "\n"
-        << "rip = " << std::setw(8) << context.Rip << " "
-        << "rflags = " << std::setw(8) << context.EFlags << "\n";
+        << "rax = " << std::setw(16) << context.Rax << " "
+        << "rbx = " << std::setw(16) << context.Rbx << " "
+        << "rcx = " << std::setw(16) << context.Rcx << " "
+        << "rdx = " << std::setw(16) << context.Rdx << "\n"
+        << "rsi = " << std::setw(16) << context.Rsi << " "
+        << "rdi = " << std::setw(16) << context.Rdi << " "
+        << "rbp = " << std::setw(16) << context.Rbp << " "
+        << "rsp = " << std::setw(16) << context.Rsp << "\n"
+        << "rip = " << std::setw(16) << context.Rip << " "
+        << "rflags = " << std::setw(16) << context.EFlags << "\n";
 #else
     // 32-битные регистры
     std::cout
@@ -264,7 +266,7 @@ void Debugger::debugRun()
         if (!WaitForDebugEvent(&debugEvent, INFINITE))
             break;
 
-        currentThread = debugEvent.dwThreadId;
+       
 
         switch (debugEvent.dwDebugEventCode)
         {
@@ -284,7 +286,7 @@ void Debugger::debugRun()
             handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpStartAddress);
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
             disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
-            setBreakPoint((DWORD)entryPoint, BreakType::software);
+            setBreakPoint((DWORD_PTR)entryPoint, BreakType::software);
             std::cout << "Entry point address: 0x" << std::hex << entryPoint << std::endl;
             initComands();
             break;
@@ -316,12 +318,13 @@ void Debugger::debugRun()
             printf("Unexpected debug event: %d\n", debugEvent.dwDebugEventCode);
         }
 
-        if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueFlag)) {
+        if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueFlag))
             printf("Error continuing debug event\n");
-        }
+
         else
         {
-            auto it = std::find_if(breakMap.begin(), breakMap.end(), [](const auto& pair) {
+            auto it = std::find_if(breakMap.begin(), breakMap.end(), [](const auto& pair)
+                {
                 return pair.second.state == BreakState::disable;
                 });
             if (it != breakMap.end())
@@ -330,6 +333,8 @@ void Debugger::debugRun()
                 it->second.state = BreakState::enable;
             }
         }
+        
+
     }
 
     CloseHandle(hProcess);
@@ -347,43 +352,56 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
 
     if (it == breakMap.end() && !isTrace && !isRun)
         return DBG_EXCEPTION_NOT_HANDLED;
+    
+
+
+    thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
+
+
+    if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
+
+    context.ContextFlags = CONTEXT_ALL;
+    GetThreadContext(thread, &context);
 
     if (it != breakMap.end())
     {
         WriteProcessMemory(hProcess, (PVOID)exceptionAddr, &it->second.saveByte, 1, NULL);
         it->second.state = BreakState::disable;
+
+    }
+    else if (it == breakMap.end() && isTrace == false)
+    {
+        context.EFlags |= 0x100;
+        SetThreadContext(thread, &context);
+        CloseHandle(thread);
+        return DBG_CONTINUE;
     }
     disasDebugProc(exceptionAddr, 1);
-
-    thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
-    if (thread != INVALID_HANDLE_VALUE)
-    {
-        context.ContextFlags = CONTEXT_ALL;
-        GetThreadContext(thread, &context);
-        if (it != breakMap.end()) 
-            #ifdef _WIN64
-                context.Rip = exceptionAddr;
-            #else
-                context.Eip = exceptionAddr;
-            #endif
-
-        
-    }
-    isTrace = false;
     isRun = false;
+    isTrace = false;
     while (!isRun && !isTrace)
     {
         std::string cmd;
         std::getline(std::cin, cmd);        
         commandLine(cmd, context);
     }
+
+#ifdef _WIN64
+    context.Rip = exceptionAddr;
+#else
+    context.Eip = exceptionAddr;
+#endif
+
     if (isTrace)
         context.EFlags |= 0x100;
     else
         context.EFlags &= ~0x100;
 
+
+
     SetThreadContext(thread, &context);
     CloseHandle(thread);
+
 
     return DBG_CONTINUE;
 }
@@ -416,7 +434,7 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
     iss >> cmd;
 
     auto it = std::find_if(commands.begin(), commands.end(), [cmd](CommandInfo elem) {return elem.name == cmd; });
-
+    this->cont = &cont;
     if (it != commands.end())
     {
         it->handler(*this, iss);
@@ -428,6 +446,7 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
 void Debugger::handleTraceCommand()
 {
     isTrace = true;
+    isRun = false;
 }
 
 
@@ -758,7 +777,8 @@ void Debugger::handleModulesCommand()
     std::cout << std::setw(18) << "Address" << " | " << std::setw(12) << "Size" << " | Name" << std::endl;
     std::cout << std::string(50, '-') << std::endl;
 
-    for (const auto& [name, mod] : modules) {
+    for (const auto& [name, mod] : modules)
+    {
         std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << mod.baseAddress
             << " | " << std::dec << std::setw(10) << mod.size
             << " | " << name << std::endl;
@@ -801,7 +821,8 @@ void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_
             std::cout << "Found " << syms.size() << " exports in EXE" << std::endl;
         }
     }
-    catch (const std::exception& e) {
+    catch (const std::exception& e)
+    {
         std::cerr << "Failed to read EXE headers: " << e.what() << std::endl;
     }
 
@@ -852,6 +873,11 @@ DWORD_PTR Debugger::getArgAddr(const std::string& arg)
 
     }
     catch (...){}
+    if (isRegisterString(arg))
+    {
+        std::string regName = arg.substr(1);
+        return (DWORD_PTR)getRegisterValue(regName);
+    }
     std::string dll, symbol;
     if (parseSymbols(arg, dll, symbol))
     {
@@ -878,6 +904,12 @@ Debugger::CommandArgs Debugger::parseArgs(std::istringstream& stream)
         return args;
     }
 
+    if (args.addressArg == "-h" || args.addressArg == "--help")
+    {
+        args.helpRequested = true;
+        return args;
+    }
+
     args.address = getArgAddr(args.addressArg);
     if (!args.address)
     {
@@ -886,11 +918,7 @@ Debugger::CommandArgs Debugger::parseArgs(std::istringstream& stream)
         return args;
     }
 
-    if (args.addressArg == "-h" || args.addressArg == "--help")
-    {
-        args.helpRequested = true;
-        return args;
-    }
+
 
     std::string token;
     while (stream >> token)
@@ -1008,9 +1036,13 @@ void Debugger::initComands()
 
                     auto it = dbg.dataSize.find(args.type);
                     if (it != dbg.dataSize.end())
-                        dbg.changeMemory(args.address, data.data(), dbg.dataSize[args.type]);
+                    {
+                        uint64_t hexNum;
+                        std::istringstream(args.value) >> std::hex >> hexNum;
+                        dbg.changeMemory(args.address, &hexNum, dbg.dataSize[args.type]);
+                    }
                     
-                    else if (args.type == "str")
+                    else if (args.type == "str" && it == dbg.dataSize.end())
                     {
                         data.push_back('\0');
                         dbg.changeMemory(args.address, data.data(), data.size());
@@ -1050,16 +1082,7 @@ void Debugger::initComands()
             [](Debugger& dbg, std::istringstream& stream)
                 {
                     std::string reg;
-                    CONTEXT context;
-                    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, dbg.currentThread);
-
-                    if (thread != INVALID_HANDLE_VALUE)
-                    {
-                        context.ContextFlags = CONTEXT_ALL;
-                        GetThreadContext(thread, &context);
-                        dbg.handleRegCommand(stream, context);
-                    }
-                   
+                    dbg.handleRegCommand(stream, *dbg.cont);
                 }
 
         },
@@ -1076,8 +1099,8 @@ void Debugger::initComands()
         },
 
         {
-            "trace",
-            "trace",
+            "g",
+            "g",
             [](Debugger& dbg, std::istringstream& stream)
                 {
                     dbg.handleTraceCommand();
@@ -1130,4 +1153,61 @@ void Debugger::initComands()
 
         }
     };
+}
+
+
+
+
+bool Debugger::isRegisterString(const std::string& str)
+{
+    if (str.empty() || str[0] != '$') return false;
+
+    std::string regName = str.substr(1);  
+
+    static const std::unordered_set<std::string> registers =
+    {
+        // x86
+        "eip", "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eflags",
+        // x64
+        "rip", "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rflags",
+        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
+    };
+
+    return registers.find(regName) != registers.end();
+}
+
+
+DWORD_PTR Debugger::getRegisterValue(const std::string& regName)
+{
+
+#ifdef _WIN64
+    if (regName == "rax") return cont->Rax;
+    if (regName == "rbx") return cont->Rbx;
+    if (regName == "rcx") return cont->Rcx;
+    if (regName == "rdx") return cont->Rdx;
+    if (regName == "rsi") return cont->Rsi;
+    if (regName == "rdi") return cont->Rdi;
+    if (regName == "rbp") return cont->Rbp;
+    if (regName == "rsp") return cont->Rsp;
+    if (regName == "rip") return cont->Rip;
+    if (regName == "r8")  return cont->R8;
+    if (regName == "r9")  return cont->R9;
+    if (regName == "r10") return cont->R10;
+    if (regName == "r11") return cont->R11;
+    if (regName == "r12") return cont->R12;
+    if (regName == "r13") return cont->R13;
+    if (regName == "r14") return cont->R14;
+    if (regName == "r15") return cont->R15;
+#else
+    if (regName == "eax") return cont->Eax;
+    if (regName == "ebx") return cont->Ebx;
+    if (regName == "ecx") return cont->Ecx;
+    if (regName == "edx") return cont->Edx;
+    if (regName == "esi") return cont->Esi;
+    if (regName == "edi") return cont->Edi;
+    if (regName == "ebp") return cont->Ebp;
+    if (regName == "esp") return cont->Esp;
+    if (regName == "eip") return cont->Eip;
+#endif
+
 }

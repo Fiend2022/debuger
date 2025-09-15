@@ -82,7 +82,8 @@ private:
 
     };
 
-    struct ActiveThread {
+    struct ActiveThread
+    {
         DWORD threadId;
         HANDLE hThread;
         bool isRunning;
@@ -99,6 +100,7 @@ private:
     std::unordered_map<DWORD, ActiveThread> threads;
     DWORD mainThreadId;
     DWORD_PTR exeBaseAddress;
+    CONTEXT* cont;
 
     DWORD currentThread;
     bool createDebugProc(const std::string& prog);
@@ -176,6 +178,8 @@ private:
 
     void initComands();
     CommandArgs parseArgs(std::istringstream& stream);
+    bool isRegisterString(const std::string& str);
+    DWORD_PTR getRegisterValue(const std::string& regName);
 
 public:
     void run(const std::string& prog);
