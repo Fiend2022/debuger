@@ -22,6 +22,95 @@ std::string to_hex(T value)
     return ss.str();
 }
 
+void setDr7Bit(DWORD& dr7, int index, int rw, int len)
+{
+    int enableShift = index * 2;      // Lx: 0,2,4,6
+    int rwShift = 16 + index * 4;     // RWx
+    int lenShift = 18 + index * 4;    // lenx
+
+    dr7 |= (1 << enableShift);           // Lx = 1
+    dr7 &= ~(3 << rwShift);              // обнуляем RWx
+    dr7 &= ~(3 << lenShift);             // обнуляем lenx
+    dr7 |= (rw << rwShift);              // ставим RWx
+    dr7 |= (len << lenShift);            // ставим lenx
+}
+
+
+
+bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size) {
+
+
+    // Найти свободный DR
+    int idx = -1;
+    for (int i = 0; i < 4; ++i) {
+        if (!hwBps[i].active) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) {
+        std::cerr << "No free hardware breakpoint register (DR0-DR3)\n";
+        return false;
+    }
+
+    // Кодируем тип
+    int rw = 0, len = 0;
+    if (typeStr == "write") {
+        rw = 1;  // запись
+    }
+    else if (typeStr == "access") {
+        rw = 3;  // чтение или запись
+    }
+    else {
+        std::cerr << "Invalid type. Use 'write' or 'access'\n";
+        return false;
+    }
+
+    // Кодируем размер
+    switch (size) {
+    case 1: len = 0; break;
+    case 2: len = 1; break;
+    case 4: len = 3; break;
+#ifdef _WIN64
+    case 8: len = 2; break;
+#else
+    default: std::cerr << "Invalid size\n"; return false;
+#endif
+    }
+
+    // Устанавливаем адрес
+    switch (idx) {
+    case 0: cont->Dr0 = addr; break;
+    case 1: cont->Dr1 = addr; break;
+    case 2: cont->Dr2 = addr; break;
+    case 3: cont->Dr3 = addr; break;
+    }
+
+    // Настраиваем DR7
+    setDr7Bit(cont->Dr7, idx, rw, len);
+
+    // Запрещаем GD (иначе зацикливание)
+    cont->Dr7 &= ~(1 << 13);
+
+
+
+    // Сохраняем состояние
+    hwBps[idx] = { true, addr, size };
+    std::cout << "HWBP set at DR" << idx << " (0x" << std::hex << addr
+        << ") type=" << typeStr << ", size=" << size << "\n";
+
+    return true;
+}
+
+int Debugger::getHardwareBreakpointIndexFromDr6(DWORD dr6)
+{
+    for (int i = 0; i < 4; ++i) {
+        if (dr6 & (1 << i)) return i;
+    }
+    return -1;
+}
+
+
 bool Debugger::createDebugProc(const std::string& prog)
 {
     if (!fs::exists(prog)) 
@@ -406,23 +495,42 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
     return DBG_CONTINUE;
 }
 
-size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exceptionDebugInfo)
-{
-    DWORD continueFlag = (DWORD)DBG_EXCEPTION_NOT_HANDLED;
+size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc) {
+    switch (exc->ExceptionRecord.ExceptionCode) {
+    case EXCEPTION_BREAKPOINT:
+        return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
 
-    switch (exceptionDebugInfo->ExceptionRecord.ExceptionCode) 
-    {
+    case EXCEPTION_SINGLE_STEP: {
+        CONTEXT ctx;
+        HANDLE thread;
 
-        case EXCEPTION_BREAKPOINT:
-            continueFlag = breakpointEvent(tid, (ULONG_PTR)exceptionDebugInfo->ExceptionRecord.ExceptionAddress);
-            break;
+        thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
 
-        
-        case EXCEPTION_SINGLE_STEP:
-            continueFlag = breakpointEvent(tid, (ULONG_PTR)exceptionDebugInfo->ExceptionRecord.ExceptionAddress);
-            break;
+
+        if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
+        ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+        if (!GetThreadContext(thread, &ctx)) break;
+
+        int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
+        if (drIndex != -1 && hwBps[drIndex].active) {
+            DWORD_PTR addr = 0;
+            switch (drIndex) {
+            case 0: addr = ctx.Dr0; break;
+            case 1: addr = ctx.Dr1; break;
+            case 2: addr = ctx.Dr2; break;
+            case 3: addr = ctx.Dr3; break;
+            }
+            std::cout << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")\n";
+            return breakpointEvent(tid, addr);
+        }
+        // Если не наша — это может быть TF (трассировка)
+        return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
     }
-    return continueFlag;
+
+    default:
+        return DBG_EXCEPTION_NOT_HANDLED;
+    }
+    return DBG_EXCEPTION_NOT_HANDLED;
 }
 
 
@@ -1151,6 +1259,33 @@ void Debugger::initComands()
                     }
                 }
 
+        },
+
+        {
+            "hwbp",
+            "",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                std::string addrStr, t, typeStr;
+                int size = 1;
+
+                stream >> addrStr >> t >> typeStr;
+                if (t != "-t") {
+                    std::cerr << "Usage: hwbp <addr> -t <write|access> [-n <size>]\n";
+                    return;
+                }
+
+                if (stream >> t >> size) {
+                    if (t != "-n") {
+                        std::cerr << "Expected -n\n";
+                        return;
+                    }
+                }
+
+                DWORD_PTR addr = dbg.getArgAddr(addrStr);
+                if (!addr) return;
+                dbg.addHardwareBreakpoint(addr, typeStr, size);
+            }
         }
     };
 }

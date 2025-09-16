@@ -53,16 +53,30 @@ private:
     {
         disable, enable
     };
-    enum class BreakType
-    {
-        software, hardware
+
+    enum class BreakType {
+        software,
+        hardware_write,
+        hardware_access
     };
+
+    struct HwBreakpoint {
+        bool active = false;
+        DWORD_PTR address = 0;
+        int size = 0; // 1, 2, 4, 8
+    };
+
+    HwBreakpoint hwBps[4];
+
+
+    bool addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size);
+    int getHardwareBreakpointIndexFromDr6(DWORD dr6);
 
     struct BreakPoint
     {
         BreakState state;
         BreakType type;
-        BYTE saveByte; // Точка останова - один байт
+        BYTE saveByte; 
     };
 
 
