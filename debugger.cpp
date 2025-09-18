@@ -22,7 +22,7 @@ std::string to_hex(T value)
     return ss.str();
 }
 
-void setDr7Bit(DWORD& dr7, int index, int rw, int len)
+void setDr7Bit(DWORD_PTR& dr7, int index, int rw, int len)
 {
     int enableShift = index * 2;      // Lx: 0,2,4,6
     int rwShift = 16 + index * 4;     // RWx
@@ -454,6 +454,7 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
 
     if (it != breakMap.end())
     {
+
         WriteProcessMemory(hProcess, (PVOID)exceptionAddr, &it->second.saveByte, 1, NULL);
         it->second.state = BreakState::disable;
 
@@ -508,7 +509,7 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
 
 
         if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
-        ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+        ctx.ContextFlags = CONTEXT_ALL;
         if (!GetThreadContext(thread, &ctx)) break;
 
         int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
@@ -521,7 +522,17 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
             case 3: addr = ctx.Dr3; break;
             }
             std::cout << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")\n";
-            return breakpointEvent(tid, addr);
+            isTrace = true;
+            #if defined(_WIN64)
+                DWORD_PTR currIp = ctx.Rip;
+            #else
+                DWORD_PTR currIp = ctx.Eip;
+            #endif
+            
+            SetThreadContext(thread, &ctx);
+            CloseHandle(thread);
+            size_t contFlag = breakpointEvent(tid, currIp);
+            return contFlag;
         }
         // Если не наша — это может быть TF (трассировка)
         return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
@@ -849,13 +860,13 @@ void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
             {
                 char* lastSlash = strrchr(nameStart, '\\');
                 if (lastSlash)
-                    strcpy(moduleName, lastSlash + 1);
+                    strcpy_s(moduleName, lastSlash + 1);
             }
         }
     }
 
     if (!moduleName[0])
-        sprintf(moduleName, "module_%p.dll", baseAddr);
+        sprintf_s(moduleName, "module_%p.dll", baseAddr);
 
     PeHeader lib(baseAddr, hProcess);
     std::vector<ExportedSymbol> syms = loadSyms(lib.getExportedSymbols());
@@ -974,7 +985,8 @@ DWORD_PTR Debugger::getArgAddr(const std::string& arg)
 {
     try
     {
-        DWORD_PTR addr = getAddr(std::istringstream(arg));
+        auto stream = std::istringstream(arg);
+        DWORD_PTR addr = getAddr(stream);
         
         if (addr != 0)
             return addr;
