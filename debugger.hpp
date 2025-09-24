@@ -9,9 +9,13 @@
 #include "disas.hpp"
 #include <sstream>
 #include <functional>
-
+#include <map>
+#include "msg.hpp"
+#include "pe.hpp"
+#include <mutex>
+#include <condition_variable>
+#include <queue>
 static const size_t lineSize = 16;
-
 
 
 
@@ -40,6 +44,13 @@ private:
     //};
 
 
+
+
+
+    std::queue<std::string> commandQueue;
+    std::mutex cmdMutex;
+    std::condition_variable cmdCV;
+    DWORD_PTR entryAddr;
     struct CommandInfo
     {
         std::string name;
@@ -69,6 +80,7 @@ private:
     HwBreakpoint hwBps[4];
 
 
+
     bool addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size);
     int getHardwareBreakpointIndexFromDr6(DWORD dr6);
 
@@ -77,6 +89,7 @@ private:
         BreakState state;
         BreakType type;
         BYTE saveByte; 
+        bool temp = false;
     };
 
 
@@ -103,6 +116,7 @@ private:
         bool isRunning;
     };
 
+    PeHeader* prog;
     std::vector<ExportedSymbol> fullExport;
     std::unordered_map<DWORD_PTR, BreakPoint> breakMap; 
     HANDLE hProcess;
@@ -115,13 +129,21 @@ private:
     DWORD mainThreadId;
     DWORD_PTR exeBaseAddress;
     CONTEXT* cont;
-
+    std::string resolveSymbol(DWORD_PTR addr);
     DWORD currentThread;
     bool createDebugProc(const std::string& prog);
     void debugRun();
 
-    // Используем DWORD_PTR для адресов
+
+
+
     size_t disasDebugProc(DWORD_PTR addr, size_t instCount = 5);
+    std::vector<DisasmLine> disasSection(IMAGE_SECTION_HEADER* sec);
+
+    std::pair<std::vector<DisasmLine>, std::vector<DisasmLine>> getSections();
+    std::vector<DisasmLine> getDataSection(IMAGE_SECTION_HEADER* sec);
+    void parseCode(std::vector<DisasmLine>* code);
+
     void setBreakPoint(DWORD_PTR addr, BreakType type);
     void deleteBreakPoint(DWORD_PTR addr);
 
@@ -136,8 +158,8 @@ private:
     void changeMemory(DWORD_PTR addr, void* value, size_t size);
 
     size_t eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exceptionDebugInfo);
-    size_t breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr); // Используем DWORD_PTR
-
+    size_t breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de);
+    std::string waitForCommand();
 
 
     std::unordered_map<std::string, size_t> dataSize =
@@ -194,7 +216,14 @@ private:
     CommandArgs parseArgs(std::istringstream& stream);
     bool isRegisterString(const std::string& str);
     DWORD_PTR getRegisterValue(const std::string& regName);
+    void pushEvent(const DebugEvent& ev);
+    std::function<void(const DebugEvent&)> eventCallback;
 
 public:
-    void run(const std::string& prog);
+    void run();
+    void setEventCallback(std::function<void(const DebugEvent&)> cb)
+    {
+        eventCallback = cb;
+    }
+    void sendCommand(const std::string& cmd);
 };

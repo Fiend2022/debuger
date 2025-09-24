@@ -9,7 +9,6 @@
 #include  <winnt.h>
 #include <Windows.h>
 #include <psapi.h>
-#include "pe.hpp"
 #include <unordered_set>
 
 namespace fs = std::filesystem;
@@ -37,36 +36,36 @@ void setDr7Bit(DWORD_PTR& dr7, int index, int rw, int len)
 
 
 
-bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size) {
+bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size)
+{
 
-
-    // Найти свободный DR
     int idx = -1;
-    for (int i = 0; i < 4; ++i) {
-        if (!hwBps[i].active) {
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!hwBps[i].active)
+        {
             idx = i;
             break;
         }
     }
-    if (idx == -1) {
+    if (idx == -1)
+    {
         std::cerr << "No free hardware breakpoint register (DR0-DR3)\n";
         return false;
     }
 
-    // Кодируем тип
     int rw = 0, len = 0;
-    if (typeStr == "write") {
-        rw = 1;  // запись
-    }
-    else if (typeStr == "access") {
-        rw = 3;  // чтение или запись
-    }
-    else {
+    if (typeStr == "write")
+        rw = 1;
+    else if (typeStr == "access")
+        rw = 3;
+    
+    else
+    {
         std::cerr << "Invalid type. Use 'write' or 'access'\n";
         return false;
     }
 
-    // Кодируем размер
     switch (size) {
     case 1: len = 0; break;
     case 2: len = 1; break;
@@ -79,22 +78,20 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     }
 
     // Устанавливаем адрес
-    switch (idx) {
+    switch (idx)
+    {
     case 0: cont->Dr0 = addr; break;
     case 1: cont->Dr1 = addr; break;
     case 2: cont->Dr2 = addr; break;
     case 3: cont->Dr3 = addr; break;
     }
 
-    // Настраиваем DR7
     setDr7Bit(cont->Dr7, idx, rw, len);
 
-    // Запрещаем GD (иначе зацикливание)
     cont->Dr7 &= ~(1 << 13);
 
 
 
-    // Сохраняем состояние
     hwBps[idx] = { true, addr, size };
     std::cout << "HWBP set at DR" << idx << " (0x" << std::hex << addr
         << ") type=" << typeStr << ", size=" << size << "\n";
@@ -104,9 +101,8 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
 
 int Debugger::getHardwareBreakpointIndexFromDr6(DWORD dr6)
 {
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
         if (dr6 & (1 << i)) return i;
-    }
     return -1;
 }
 
@@ -154,10 +150,23 @@ bool Debugger::createDebugProc(const std::string& prog)
 }
 
 
-void Debugger::run(const std::string& prog)
+void Debugger::run()
 {
+    bool ready = false;
+    std::string prog;
+    while(!ready)
+        if (!commandQueue.empty())
+        {
+            prog = waitForCommand();
+            ready = true;
+        }
     if (createDebugProc(prog))
+    {
         debugRun();
+        DebugEvent de;
+        de.type = DebugEvent::ProcessExit;
+        eventCallback(de);
+    }
     else
         std::cerr << "Failed to create process: " << GetLastError() << std::endl;
 }
@@ -350,11 +359,12 @@ void Debugger::debugRun()
     while (active) 
     {
         DEBUG_EVENT debugEvent;
+        DebugEvent de;
         DWORD continueFlag = DBG_CONTINUE;
-        LPTHREAD_START_ROUTINE entryPoint;
+        static LPTHREAD_START_ROUTINE entryPoint;
         if (!WaitForDebugEvent(&debugEvent, INFINITE))
             break;
-
+        static std::vector<DisasmLine> sourceCode, data;
        
 
         switch (debugEvent.dwDebugEventCode)
@@ -368,17 +378,31 @@ void Debugger::debugRun()
             //std::cout << "Thread exited: " << debugEvent.dwThreadId << std::endl;
             break;
         case CREATE_PROCESS_DEBUG_EVENT:
+        {
             std::cout << "Process created: " << std::hex << debugEvent.dwProcessId << std::endl;
             mainThreadId = debugEvent.dwThreadId;
             handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
             exeBaseAddress = (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpBaseOfImage;
             handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpStartAddress);
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
-            disasDebugProc(reinterpret_cast<DWORD_PTR>(entryPoint));
-            setBreakPoint((DWORD_PTR)entryPoint, BreakType::software);
-            std::cout << "Entry point address: 0x" << std::hex << entryPoint << std::endl;
+            DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
+            disasDebugProc(entryAddr);
+            std::cout << "Entry point address: 0x" << std::hex << entryAddr << std::endl;
             initComands();
+            std::tie(sourceCode, data) = getSections();
+            setBreakPoint(entryAddr, BreakType::software);
+            auto it = std::find_if(sourceCode.begin(), sourceCode.end(),
+                [entryAddr](const DisasmLine& line)
+                { return line.address == entryAddr; }
+            );
+            it->hasBreakpoint = true;
+            de.address = (DWORD_PTR)entryPoint;
+            de.disasmCode = sourceCode;
+            de.data = data;
+            de.type = DebugEvent::DisasmReady;
+            eventCallback(de);
             break;
+        }
 
         case EXIT_PROCESS_DEBUG_EVENT:
             std::cout << "Process exited: " << debugEvent.dwProcessId << std::endl;
@@ -386,7 +410,11 @@ void Debugger::debugRun()
             break;
         case LOAD_DLL_DEBUG_EVENT:
             handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
-            //std::cout << "DLL loaded: " << debugEvent.u.LoadDll.lpBaseOfDll << std::endl;
+            parseCode(&sourceCode);
+            de.address = (DWORD_PTR)entryPoint;
+            de.disasmCode = sourceCode;
+            de.type = DebugEvent::ModuleLoad;
+            eventCallback(de);
             break;
 
         case UNLOAD_DLL_DEBUG_EVENT:
@@ -431,18 +459,17 @@ void Debugger::debugRun()
     return;
 }
 
-size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
+size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de)
 {
     CONTEXT context;
     HANDLE thread;
-
-
+    de->address = exceptionAddr;
     auto it = breakMap.find(exceptionAddr);
 
     if (it == breakMap.end() && !isTrace && !isRun)
         return DBG_EXCEPTION_NOT_HANDLED;
     
-
+    
 
     thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
 
@@ -469,11 +496,23 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
     disasDebugProc(exceptionAddr, 1);
     isRun = false;
     isTrace = false;
+
+    //de->type = DebugEvent::BreakpointEvent;
+    de->context = context;
+    de->address = exceptionAddr;
+    eventCallback(*de);
+
     while (!isRun && !isTrace)
     {
-        std::string cmd;
-        std::getline(std::cin, cmd);        
-        commandLine(cmd, context);
+        if (!commandQueue.empty())
+        {
+            std::string cmd = waitForCommand();
+            if (!cmd.empty())
+            {
+                commandLine(cmd, context);
+
+            }
+        }
     }
 
 #ifdef _WIN64
@@ -496,47 +535,64 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr)
     return DBG_CONTINUE;
 }
 
-size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc) {
-    switch (exc->ExceptionRecord.ExceptionCode) {
-    case EXCEPTION_BREAKPOINT:
-        return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
+std::string Debugger::waitForCommand()
+{
+    std::unique_lock<std::mutex> lock(cmdMutex);
+    cmdCV.wait(lock, [this] { return !commandQueue.empty(); });
+    std::string cmd = commandQueue.front();
+    commandQueue.pop();
+    return cmd;
+}
 
-    case EXCEPTION_SINGLE_STEP: {
-        CONTEXT ctx;
-        HANDLE thread;
+size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc)
+{
+    DebugEvent de;
+    switch (exc->ExceptionRecord.ExceptionCode)
+    {
+        case EXCEPTION_BREAKPOINT:
+            de.type = DebugEvent::BreakpointEvent;
+            return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
 
-        thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
+        case EXCEPTION_SINGLE_STEP:
+        {
+            CONTEXT ctx;
+            HANDLE thread;
+
+            thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
 
 
-        if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
-        ctx.ContextFlags = CONTEXT_ALL;
-        if (!GetThreadContext(thread, &ctx)) break;
+            if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
+            ctx.ContextFlags = CONTEXT_ALL;
+            if (!GetThreadContext(thread, &ctx)) break;
 
-        int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
-        if (drIndex != -1 && hwBps[drIndex].active) {
-            DWORD_PTR addr = 0;
-            switch (drIndex) {
-            case 0: addr = ctx.Dr0; break;
-            case 1: addr = ctx.Dr1; break;
-            case 2: addr = ctx.Dr2; break;
-            case 3: addr = ctx.Dr3; break;
-            }
-            std::cout << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")\n";
-            isTrace = true;
+            int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
+            if (drIndex != -1 && hwBps[drIndex].active)
+            {
+                DWORD_PTR addr = 0;
+                switch (drIndex)
+                {
+                case 0: addr = ctx.Dr0; break;
+                case 1: addr = ctx.Dr1; break;
+                case 2: addr = ctx.Dr2; break;
+                case 3: addr = ctx.Dr3; break;
+                }
+                std::cout << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")\n";
+                isTrace = true;
             #if defined(_WIN64)
                 DWORD_PTR currIp = ctx.Rip;
             #else
                 DWORD_PTR currIp = ctx.Eip;
             #endif
-            
-            SetThreadContext(thread, &ctx);
-            CloseHandle(thread);
-            size_t contFlag = breakpointEvent(tid, currIp);
-            return contFlag;
+
+                SetThreadContext(thread, &ctx);
+                CloseHandle(thread);
+                de.type = DebugEvent::HardwareBreak;
+                size_t contFlag = breakpointEvent(tid, currIp, &de);
+                return contFlag;
+            }
         }
-        // Если не наша — это может быть TF (трассировка)
-        return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
-    }
+        de.type = DebugEvent::Step;
+        return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
 
     default:
         return DBG_EXCEPTION_NOT_HANDLED;
@@ -555,9 +611,8 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
     auto it = std::find_if(commands.begin(), commands.end(), [cmd](CommandInfo elem) {return elem.name == cmd; });
     this->cont = &cont;
     if (it != commands.end())
-    {
         it->handler(*this, iss);
-    }
+    
 
 
 }
@@ -925,12 +980,9 @@ void Debugger::handleThreadsCommand()
 
 void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint)
 {
-    
-
-    // Попробуем прочитать DOS-заголовок
     try {
         PeHeader pe(baseAddr, hProcess);
-
+        prog = new PeHeader(pe);
         std::cout << "EXE Base: 0x" << std::hex << baseAddr << std::endl;
 
         if (pe.hasExports())
@@ -1224,6 +1276,19 @@ void Debugger::initComands()
             [](Debugger& dbg, std::istringstream& stream)
                 {
                     dbg.handleTraceCommand();
+                    if (dbg.eventCallback)
+                    {
+                        DebugEvent de;
+                        #if defined(_WIN64)
+                            de.address = dbg.cont->Rip;
+                        #else
+                            de.address = dbg.cont->Eip;
+                        #endif
+                        de.context = *dbg.cont;
+                        de.type = DebugEvent::Step;
+                        dbg.eventCallback(de);
+                    }
+                    
                 }
         },
 
@@ -1251,9 +1316,9 @@ void Debugger::initComands()
             "symbols",
             "symbols",
             [](Debugger& dbg, std::istringstream& stream)
-                {
+            {
                     dbg.handleSymbolsCommand();
-                }
+            }
         },
 
         {
@@ -1297,6 +1362,25 @@ void Debugger::initComands()
                 DWORD_PTR addr = dbg.getArgAddr(addrStr);
                 if (!addr) return;
                 dbg.addHardwareBreakpoint(addr, typeStr, size);
+            }
+        },
+        {
+            "load",
+            "load <programm",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                std::string prog;
+                stream >> prog;
+
+                dbg.createDebugProc(prog);
+            }
+        },
+        {
+            "stop",
+            "stop",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                    dbg.active = false;
             }
         }
     };
@@ -1357,4 +1441,124 @@ DWORD_PTR Debugger::getRegisterValue(const std::string& regName)
     if (regName == "eip") return cont->Eip;
 #endif
 
+}
+
+std::vector<DisasmLine> Debugger::disasSection(IMAGE_SECTION_HEADER* sec)
+{
+    DWORD_PTR addr = sec->VirtualAddress + exeBaseAddress;
+    std::vector<DisasmLine> text;
+    while (addr  - exeBaseAddress < sec->VirtualAddress + sec->Misc.VirtualSize)
+    {   
+        std::vector<uint8_t> buf(16);
+        std::string asmBuf(128, '\0');
+        std::string hexBuf(128, '\0');
+        SIZE_T bytesRead;
+        if (!ReadProcessMemory(hProcess, (LPCVOID)addr, buf.data(), 16, &bytesRead) || bytesRead == 0)
+        {
+            break;
+        }
+        size_t len = disas.DisasInst(buf.data(), bytesRead, addr, asmBuf, hexBuf);
+        text.push_back({ addr, hexBuf, asmBuf });
+        addr += len;
+    }
+    return text;
+}
+
+std::pair<std::vector<DisasmLine>, std::vector<DisasmLine>> Debugger::getSections()
+{
+    std::vector<DisasmLine> codeSections, data;
+
+    auto secs = prog->getSections();
+    for (auto sec : secs)
+    {
+        if ((sec.Characteristics & IMAGE_SCN_CNT_CODE) && (sec.Characteristics & IMAGE_SCN_MEM_EXECUTE))
+        {
+            auto disasCode = disasSection(&sec);
+            std::copy(disasCode.begin(), disasCode.end(), std::back_inserter(codeSections));
+        }
+        else if ((sec.Characteristics & (IMAGE_SCN_CNT_INITIALIZED_DATA |
+            IMAGE_SCN_CNT_UNINITIALIZED_DATA)) &&
+           !(sec.Characteristics & IMAGE_SCN_MEM_EXECUTE))
+        {
+            auto dataSec = getDataSection(&sec);
+            std::copy(dataSec.begin(), dataSec.end(), std::back_inserter(data));
+        }
+    }
+    return { codeSections, data };
+}
+std::vector<DisasmLine> Debugger::getDataSection(IMAGE_SECTION_HEADER* sec)
+{
+    DWORD_PTR addr = sec->VirtualAddress + exeBaseAddress;
+    std::vector<DisasmLine> text;
+
+    while (addr < sec->VirtualAddress + exeBaseAddress + sec->Misc.VirtualSize)
+    {
+        std::vector<uint8_t> buf(16);
+        SIZE_T bytesRead;
+
+        if (!ReadProcessMemory(hProcess, (LPCVOID)addr, buf.data(), 16, &bytesRead)
+            || bytesRead == 0)
+            break;
+        
+
+        std::string hexStr;
+        for (SIZE_T i = 0; i < bytesRead; ++i)
+        {
+            char byte[4];
+            sprintf_s(byte, "%02X ", buf[i]);
+            hexStr += byte;
+        }
+        if (!hexStr.empty()) hexStr.pop_back();
+
+        std::string ascii;
+        for (SIZE_T i = 0; i < bytesRead; ++i)
+        {
+            char c = buf[i];
+            ascii += (c >= 32 && c < 127) ? c : '.';
+        }
+
+        DisasmLine tmp = { addr, hexStr, ascii };
+        text.push_back(tmp);
+        addr += 16;
+    }
+    return text;
+}
+
+std::string Debugger::resolveSymbol(DWORD_PTR addr)
+{
+    for (const auto& mod : modules)
+        for (const auto& exp : mod.second.symbols)
+            if (exp.address == addr)
+                return mod.first + "!" + exp.name;
+    return "";
+}
+
+void Debugger::parseCode(std::vector<DisasmLine>* code)
+{
+    for (auto it = code->begin(); it != code->end(); it++)
+    {
+        if((it->instruction.find("call") != std::string::npos)
+            || (it->instruction.find("jmp") != std::string::npos))
+        {
+            auto pos = it->instruction.find("0x");
+            if (pos != std::string::npos)
+            {
+                std::string hexPart = it->instruction.substr(pos);
+                DWORD_PTR targetAddr = std::stoull(hexPart, nullptr, 16);
+                std::string symbol = resolveSymbol(targetAddr);
+                if (!symbol.empty())
+                {
+                    std::string newInst = it->instruction.substr(0, pos) + symbol;
+                    it->instruction = newInst;
+                }
+            }
+        }
+    }
+}
+
+void Debugger::sendCommand(const std::string& cmd)
+{
+    std::lock_guard<std::mutex> lock(cmdMutex);
+    commandQueue.push(cmd);
+    cmdCV.notify_one();
 }

@@ -55,7 +55,7 @@ private:
 public:
 
     PeHeader(DWORD_PTR moduledBase, HANDLE _hProc);
-
+    PeHeader() = default;
     const std::vector<IMAGE_SECTION_HEADER>& getSections() { return sections; }
     const IMAGE_SECTION_HEADER* getSectionByName(const char* name) const;
     

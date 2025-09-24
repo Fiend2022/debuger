@@ -14,6 +14,8 @@
     static const size_t DISAS_MODE = 32;
 #endif
 
+
+
 class Disassembler
 {
 private:
@@ -39,8 +41,7 @@ public:
             hexString = ud_insn_hex(&udObj);
             return ud_insn_len(&udObj);
         }
-        else {
+        else
             return 0;
-        }
     }
 };
