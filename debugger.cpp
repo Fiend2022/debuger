@@ -198,7 +198,7 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
     return offset;
 }
 
-void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type = BreakType::software)
+void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type = BreakType::software, bool temp = false)
 {
     auto it = breakMap.find(addr);
     if (it == breakMap.end())
@@ -206,7 +206,7 @@ void Debugger::setBreakPoint(DWORD_PTR addr, BreakType type = BreakType::softwar
         BYTE saveByte;
         ReadProcessMemory(hProcess, (PVOID)addr, &saveByte, 1, NULL);
         WriteProcessMemory(hProcess, (PVOID)addr, "\xCC", 1, NULL);
-        breakMap[addr] = { BreakState::enable, BreakType::software, saveByte };
+        breakMap[addr] = { BreakState::enable, BreakType::software, saveByte, temp };
     }
 }
 
@@ -494,6 +494,16 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
         return DBG_CONTINUE;
     }
     disasDebugProc(exceptionAddr, 1);
+    if (it != breakMap.end())
+    {
+        if (it->second.temp)
+            deleteBreakPoint(it->first);
+    }
+#ifdef _WIN64
+    context.Rip = exceptionAddr;
+#else
+    context.Eip = exceptionAddr;
+#endif
     isRun = false;
     isTrace = false;
 
@@ -515,11 +525,7 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
         }
     }
 
-#ifdef _WIN64
-    context.Rip = exceptionAddr;
-#else
-    context.Eip = exceptionAddr;
-#endif
+
 
     if (isTrace)
         context.EFlags |= 0x100;
@@ -1329,10 +1335,13 @@ void Debugger::initComands()
                     size_t n = 0;
                     for (auto& [addr, bp] : dbg.breakMap)
                     {   
-                        std::string type = (bp.type == BreakType::software) ? "soft" : "hard";
-                        std::cout << n << ") " << type << ": ";
-                        dbg.disasDebugProc(addr, 1);
-                        n++;
+                        if (!bp.temp)
+                        {
+                            std::string type = (bp.type == BreakType::software) ? "soft" : "hard";
+                            std::cout << n << ") " << type << ": ";
+                            dbg.disasDebugProc(addr, 1);
+                            n++;
+                        }
                     }
                 }
 
@@ -1381,6 +1390,22 @@ void Debugger::initComands()
             [](Debugger& dbg, std::istringstream& stream)
             {
                     dbg.active = false;
+            }
+        },
+        {
+            "n",
+            "n",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                dbg.handleStepOut();
+            }
+        },
+        {
+            "p",
+            "p",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                dbg.handleStepOver();
             }
         }
     };
@@ -1561,4 +1586,56 @@ void Debugger::sendCommand(const std::string& cmd)
     std::lock_guard<std::mutex> lock(cmdMutex);
     commandQueue.push(cmd);
     cmdCV.notify_one();
+}
+
+void Debugger::handleStepOut()
+{
+    DWORD_PTR retAddr = getRetAddr();
+    setBreakPoint(retAddr, BreakType::software, true);
+    isRun = true;
+}
+
+void Debugger::handleStepOver()
+{
+#if defined(_WIN64)
+    DWORD_PTR curIP = cont->Rip;
+#else
+    DWORD_PTR curIP = cont->Eip;
+#endif
+    DWORD_PTR retAddr = curIP;
+    std::vector<uint8_t> buf(16);
+    std::string asmBuf(128, '\0');
+    std::string hexBuf(128, '\0');
+    SIZE_T bytesRead;
+    if (ReadProcessMemory(hProcess, (LPCVOID)retAddr, buf.data(), 16, &bytesRead) || bytesRead == 0)
+    {
+        size_t len = disas.DisasInst(buf.data(), bytesRead, retAddr, asmBuf, hexBuf);
+        if (asmBuf.find("call") != std::string::npos)
+        {
+            setBreakPoint(curIP + len, BreakType::software, true);
+            isRun = true;
+        }
+        else
+            isTrace = true;
+    }
+
+}
+
+DWORD_PTR Debugger::getRetAddr() {
+
+
+#if defined(_WIN64)
+    DWORD_PTR stackPointer = cont->Rsp;
+#else
+    DWORD_PTR stackPointer = cont->Esp;
+#endif
+
+    DWORD_PTR retAddr;
+    SIZE_T bytesRead;
+
+    if (ReadProcessMemory(hProcess, (LPCVOID)stackPointer, &retAddr, sizeof(retAddr), &bytesRead) &&
+        bytesRead == sizeof(retAddr)) {
+        return retAddr;
+    }
+    return 0;
 }

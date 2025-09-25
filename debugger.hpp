@@ -144,7 +144,7 @@ private:
     std::vector<DisasmLine> getDataSection(IMAGE_SECTION_HEADER* sec);
     void parseCode(std::vector<DisasmLine>* code);
 
-    void setBreakPoint(DWORD_PTR addr, BreakType type);
+    void setBreakPoint(DWORD_PTR addr, BreakType type, bool temp);
     void deleteBreakPoint(DWORD_PTR addr);
 
     void printRegisters(const CONTEXT& context);
@@ -160,7 +160,7 @@ private:
     size_t eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exceptionDebugInfo);
     size_t breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de);
     std::string waitForCommand();
-
+    DWORD_PTR getRetAddr();
 
     std::unordered_map<std::string, size_t> dataSize =
     {
@@ -184,7 +184,8 @@ private:
     void handleModulesCommand();
     void handleThreadsCommand();
     void handleSymbolsCommand();
-
+    void handleStepOver();
+    void handleStepOut();
 
     void handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info);
     void handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr);

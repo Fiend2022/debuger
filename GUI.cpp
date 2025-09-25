@@ -310,7 +310,7 @@ void GUI::renderDisassemblyCode()
             if (ImGui::InvisibleButton("bp", ImVec2(20, lineHeight)))
                 if (commandCallback)
                 {
-                    line.hasBreakpoint = true;
+                    line.hasBreakpoint = !line.hasBreakpoint;
                     std::ostringstream oss;
                     oss << "bp 0x" << std::hex << line.address;
                     commandCallback(oss.str());
@@ -427,27 +427,46 @@ void GUI::renderDebugButtons()
         ImGui::GetColorU32(ImGui::IsItemHovered() ? IM_COL32(0, 255, 0, 255) : IM_COL32(0, 200, 0, 255))
     );
     ImGui::SameLine();
-    //if (ImGui::Button("step_over", buttonSize)) {
-    //    if (commandCallback) commandCallback("p");
-    //}
-    //if (ImGui::IsItemHovered()) ImGui::SetTooltip("Step Over (F8)");
+    if (ImGui::Button("step_out", buttonSize))
+        if (commandCallback) commandCallback("n");
+    
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Step Out (F8)");
 
-    //ImVec2 p2 = ImGui::GetItemRectMin();
-    //ImVec2 sz2 = ImGui::GetItemRectSize();
-    //float pad2 = 6.0f;
+    ImVec2 p2 = ImGui::GetItemRectMin();
+    ImVec2 sz2 = ImGui::GetItemRectSize();
+    float pad2 = 6.0f;
 
-    //draw = ImGui::GetWindowDrawList();
-    //draw->AddQuadFilled(
-    //    ImVec2(p2.x + pad2, p2.y + pad2),
-    //    ImVec2(p2.x + sz2.x - pad2, p2.y + sz2.y / 2),
-    //    ImVec2(p2.x + pad2, p2.y + sz2.y - pad2),
-    //    ImVec2(p2.x + pad2, p2.y + sz2.y / 2),
-    //    ImGui::GetColorU32(ImGui::IsItemHovered() ? IM_COL32(255, 255, 0, 255) : IM_COL32(200, 200, 0, 255))
-    //);
+    draw = ImGui::GetWindowDrawList();
+    draw->AddQuadFilled(
+        ImVec2(p2.x + pad2, p2.y + pad2),
+        ImVec2(p2.x + sz2.x - pad2, p2.y + sz2.y / 2),
+        ImVec2(p2.x + pad2, p2.y + sz2.y - pad2),
+        ImVec2(p2.x + pad2, p2.y + sz2.y / 2),
+        ImGui::GetColorU32(ImGui::IsItemHovered() ? IM_COL32(255, 255, 0, 255) : IM_COL32(200, 200, 0, 255))
+    );
     ImGui::SameLine();
-    if (ImGui::Button("run", buttonSize)) {
+    // --- Step Over (F8) ---
+    if (ImGui::Button("step_over", buttonSize))
+        if (commandCallback) commandCallback("p");  // "p" = step over
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Step Over (F8)");
+
+    p2 = ImGui::GetItemRectMin();
+    sz2 = ImGui::GetItemRectSize();
+    pad2 = 6.0f;
+
+    // Квадрат с наклоном → стрелка вправо (шаг мимо)
+    draw = ImGui::GetWindowDrawList();
+    draw->AddQuadFilled(
+        ImVec2(p2.x + pad2, p2.y + pad2),
+        ImVec2(p2.x + sz2.x - pad2, p2.y + pad2 + 4),
+        ImVec2(p2.x + sz2.x - pad2, p2.y + sz2.y - pad2 - 4),
+        ImVec2(p2.x + pad2, p2.y + sz2.y - pad2),
+        ImGui::GetColorU32(ImGui::IsItemHovered() ? IM_COL32(255, 255, 0, 255) : IM_COL32(200, 200, 0, 255))
+    );
+    ImGui::SameLine();
+    if (ImGui::Button("run", buttonSize))
         if (commandCallback) commandCallback("run");
-    }
+    
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Run (F9)");
 
     ImVec2 p3 = ImGui::GetItemRectMin();
