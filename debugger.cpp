@@ -50,7 +50,7 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     }
     if (idx == -1)
     {
-        std::cerr << "No free hardware breakpoint register (DR0-DR3)\n";
+        logger.warning("No free hardware breakpoint register (DR0-DR3)");
         return false;
     }
 
@@ -62,7 +62,7 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     
     else
     {
-        std::cerr << "Invalid type. Use 'write' or 'access'\n";
+        logger.warning("Invalid type. Use 'write' or 'access'");
         return false;
     }
 
@@ -73,7 +73,7 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
 #ifdef _WIN64
     case 8: len = 2; break;
 #else
-    default: std::cerr << "Invalid size\n"; return false;
+    default: logger.warning("Invalid size"); return false;
 #endif
     }
 
@@ -93,9 +93,10 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
 
 
     hwBps[idx] = { true, addr, size };
-    std::cout << "HWBP set at DR" << idx << " (0x" << std::hex << addr
-        << ") type=" << typeStr << ", size=" << size << "\n";
-
+    std::stringstream ss;
+    ss << "HWBP set at DR" << idx << " (0x" << std::hex << addr
+        << ") type=" << typeStr << ", size=" << size;
+    logger.info(ss.str());
     return true;
 }
 
@@ -111,7 +112,7 @@ bool Debugger::createDebugProc(const std::string& prog)
 {
     if (!fs::exists(prog)) 
     {
-        std::cerr << "Executable file not found: " << prog << std::endl;
+        logger.error(std::string("Executable file not found: ")  + prog);
         return false;
     }
 
@@ -144,7 +145,7 @@ bool Debugger::createDebugProc(const std::string& prog)
         isRun = true;
     }
     else
-        std::cerr << "Failed to create process: " << GetLastError() << std::endl;
+        logger.error(std::string("Failed to create process: ") + std::to_string(GetLastError()));
     return ret;
     
 }
@@ -160,15 +161,16 @@ void Debugger::run()
             prog = waitForCommand();
             ready = true;
         }
+    logger.init(prog);
     if (createDebugProc(prog))
     {
+        
         debugRun();
         DebugEvent de;
         de.type = DebugEvent::ProcessExit;
         eventCallback(de);
     }
-    else
-        std::cerr << "Failed to create process: " << GetLastError() << std::endl;
+    logger.close();
 }
 
 size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
@@ -179,7 +181,9 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
 
     if (!ReadProcessMemory(hProcess, (LPCVOID)addr, buf.data(), size, NULL))
     {
-        std::cerr << "Failed to read memory: " << GetLastError() << std::endl;
+        std::stringstream ss;
+        ss << "Failed to read memory: " << GetLastError() << " on address: " << addr;
+        logger.error(ss.str());
         return 0;
     }
 
@@ -219,8 +223,12 @@ void Debugger::deleteBreakPoint(DWORD_PTR addr)
         WriteProcessMemory(hProcess, (PVOID)addr, &breakMap[addr].saveByte, 1, NULL);
         breakMap.erase(it);
     }
-    else 
-        std::cerr << "No breakpoint found at 0x" << std::hex << addr << std::endl;
+    else
+    {
+        std::stringstream ss;
+        ss << "No breakpoint found at 0x" << std::hex << addr;
+        logger.warning(ss.str());
+    }
 
 }
 
@@ -371,26 +379,38 @@ void Debugger::debugRun()
         {
         case CREATE_THREAD_DEBUG_EVENT:
             handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
-            //std::cout << "Thread created: " << debugEvent.dwThreadId << std::endl;
             break;
         case EXIT_THREAD_DEBUG_EVENT:
             handleExitThread(debugEvent.dwProcessId, debugEvent.dwThreadId, debugEvent.u.ExitProcess.dwExitCode);
-            //std::cout << "Thread exited: " << debugEvent.dwThreadId << std::endl;
             break;
         case CREATE_PROCESS_DEBUG_EVENT:
         {
-            std::cout << "Process created: " << std::hex << debugEvent.dwProcessId << std::endl;
+            std::stringstream ss;
+            ss << "Process created: " << std::hex << debugEvent.dwProcessId;
+            std::cout << ss.str() << std::endl;
+            logger.info(ss.str());
+            ss.str("");
+
             mainThreadId = debugEvent.dwThreadId;
             handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
+            
             exeBaseAddress = (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpBaseOfImage;
             handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpStartAddress);
+            
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
             DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
             disasDebugProc(entryAddr);
-            std::cout << "Entry point address: 0x" << std::hex << entryAddr << std::endl;
+
+            ss << "Entry point address: 0x" << std::hex << entryAddr;
+            std::cout << ss.str() << std::endl;
+            logger.info(ss.str());
+
             initComands();
+
             std::tie(sourceCode, data) = getSections();
+
             setBreakPoint(entryAddr, BreakType::software);
+
             auto it = std::find_if(sourceCode.begin(), sourceCode.end(),
                 [entryAddr](const DisasmLine& line)
                 { return line.address == entryAddr; }
@@ -405,25 +425,31 @@ void Debugger::debugRun()
         }
 
         case EXIT_PROCESS_DEBUG_EVENT:
+            logger.info("Process exited: " + std::to_string(debugEvent.dwProcessId));
             std::cout << "Process exited: " << debugEvent.dwProcessId << std::endl;
             active = false;
             break;
         case LOAD_DLL_DEBUG_EVENT:
+        {
             handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
             parseCode(&sourceCode);
+
             de.address = (DWORD_PTR)entryPoint;
             de.disasmCode = sourceCode;
             de.type = DebugEvent::ModuleLoad;
             eventCallback(de);
             break;
+        }
 
         case UNLOAD_DLL_DEBUG_EVENT:
             handleUnloadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, reinterpret_cast<DWORD_PTR>(debugEvent.u.UnloadDll.lpBaseOfDll));
-            std::cout << "DLL unloaded: " << debugEvent.u.UnloadDll.lpBaseOfDll << std::endl;
+            logger.info("DLL unloaded: " 
+                + std::to_string(DWORD_PTR(debugEvent.u.UnloadDll.lpBaseOfDll)));
             break;
 
         case OUTPUT_DEBUG_STRING_EVENT:
-            std::cout << "Debug string: " << debugEvent.u.DebugString.lpDebugStringData << std::endl;
+            logger.info("Debug string: "
+                + std::string(debugEvent.u.DebugString.lpDebugStringData));
             break;
 
         case EXCEPTION_DEBUG_EVENT:
@@ -432,11 +458,11 @@ void Debugger::debugRun()
             break;
 
         default:
-            printf("Unexpected debug event: %d\n", debugEvent.dwDebugEventCode);
+            logger.warning("Unexpected debug event:" + std::to_string(debugEvent.dwDebugEventCode));
         }
 
         if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueFlag))
-            printf("Error continuing debug event\n");
+            logger.error("Error continuing debug event");
 
         else
         {
@@ -582,7 +608,10 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
                 case 2: addr = ctx.Dr2; break;
                 case 3: addr = ctx.Dr3; break;
                 }
-                std::cout << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")\n";
+                std::stringstream ss;
+                ss << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")";
+                logger.debug(ss.str());
+                std::cout << ss.str() << std::endl;
                 isTrace = true;
             #if defined(_WIN64)
                 DWORD_PTR currIp = ctx.Rip;
@@ -635,7 +664,9 @@ DWORD_PTR getAddr(std::istringstream& stream)
     std::string addrStr;
     stream >> addrStr;
 
-    if (addrStr.empty()) {
+    if (addrStr.empty())
+    {
+        
         std::cerr << "Address is missing.\n";
         return 0;
     }
@@ -700,42 +731,6 @@ void Debugger::handleDumpCommand(std::istringstream& stream)
     printMemory(addr);
 }
 
-
-void Debugger::handleDisasCommand(std::istringstream& stream)
-{
-    std::string arg;
-    stream >> arg;
-    DWORD_PTR addr = getArgAddr(arg);
-    disasDebugProc(addr);
-}
-
-void  Debugger::handleEditCommand(std::istringstream& stream)
-{
-    DWORD_PTR addr = getAddr(stream);
-    size_t size, value;
-    std::string strSize;
-    stream >> strSize;
-    
-
-    auto it = dataSize.find(strSize);
-    if (it != dataSize.end())
-    {
-        if (!(stream >> std::hex >> value)) 
-        {
-            std::cerr << "Invalid value format. Expected hexadecimal value.\n";
-            return;
-        }
-        changeMemory(addr, &value, dataSize[strSize]);
-    }
-    else
-    {
-        std::cerr << "Invalid size type. Expected db, dw, or dd.\n";
-        return;
-    }
-
-
-
-}
 
 
 
@@ -860,7 +855,10 @@ void Debugger::handleRegCommand(std::istringstream& stream, CONTEXT& context)
         std::cout << "Register " << regName << " updated to 0x" << std::hex << value << std::endl;
     }
     else
+    {
+        logger.warning(std::string("Unknown register: ") + regName);
         std::cerr << "Unknown register: " << regName << "\n";
+    }
 }
 
 void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
@@ -869,8 +867,11 @@ void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
     if (it != threads.end())
     {
         CloseHandle(it->second.hThread);
-        std::cout << "[-] Thread exited: TID=" << std::dec << tid
-            << ", ExitCode=" << exitCode << std::endl;
+        std::stringstream ss;
+        ss << "[-] Thread exited: TID=" << std::dec << tid
+            << ", ExitCode=" << exitCode;
+        logger.info(ss.str());
+        std::cout<< ss.str() << std::endl;
         threads.erase(it);
     }
 }
@@ -945,9 +946,10 @@ void Debugger::handleLoadDLL(DWORD pid, DWORD tid, LOAD_DLL_DEBUG_INFO* info)
         size,
         syms
     };
-
-    std::cout << "[+] DLL loaded: " << moduleName
-        << " @ 0x" << std::hex << baseAddr << std::endl;
+    std::stringstream ss;
+    ss << "[+] DLL loaded: " << moduleName << " @ 0x" << std::hex << baseAddr;
+    logger.info(ss.str());
+    std::cout << ss.str() << std::endl;
 }
 
 
@@ -986,25 +988,33 @@ void Debugger::handleThreadsCommand()
 
 void Debugger::handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint)
 {
+    std::stringstream ss;
     try {
         PeHeader pe(baseAddr, hProcess);
         prog = new PeHeader(pe);
-        std::cout << "EXE Base: 0x" << std::hex << baseAddr << std::endl;
-
+        ss << "EXE Base: 0x" << std::hex << baseAddr;
+        std::cout << ss.str()  << std::endl;
+        logger.info(ss.str());
+        ss.str("");
         if (pe.hasExports())
         {
             std::vector<ExportedSymbol> syms = loadSyms(pe.getExportedSymbols());
             modules[name] = { baseAddr, 0x1000, syms };
-            std::cout << "Found " << syms.size() << " exports in EXE" << std::endl;
+            ss << "Found " << syms.size() << " exports in EXE";
+            logger.info(ss.str());
+            ss.str("");
         }
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Failed to read EXE headers: " << e.what() << std::endl;
+        ss << "Failed to read EXE headers: " << e.what();
+        logger.error(ss.str());
     }
 
-    std::cout << "[+] EXE loaded: " << name << " @ 0x" << std::hex << baseAddr
-        << ", Entry: 0x" << entryPoint << std::endl;
+    ss << "[+] EXE loaded: " << name << " @ 0x" << std::hex << baseAddr
+        << ", Entry: 0x" << entryPoint;
+    std::cout << ss.str() << std::endl;
+    logger.info(ss.str());
 }
 
 

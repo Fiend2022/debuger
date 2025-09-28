@@ -15,6 +15,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <queue>
+#include "Logger.hpp"
 static const size_t lineSize = 16;
 
 
@@ -219,6 +220,9 @@ private:
     DWORD_PTR getRegisterValue(const std::string& regName);
     void pushEvent(const DebugEvent& ev);
     std::function<void(const DebugEvent&)> eventCallback;
+
+
+    Logger logger;
 
 public:
     void run();

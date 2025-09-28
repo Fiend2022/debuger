@@ -147,6 +147,7 @@
     <ClCompile Include="..\..\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="debugger.cpp" />
     <ClCompile Include="GUI.cpp" />
+    <ClCompile Include="Logger.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="pe.cpp" />
   </ItemGroup>
@@ -156,6 +157,7 @@
     <ClInclude Include="debugger.hpp" />
     <ClInclude Include="disas.hpp" />
     <ClInclude Include="GUI.h" />
+    <ClInclude Include="Logger.hpp" />
     <ClInclude Include="msg.hpp" />
     <ClInclude Include="pe.hpp" />
   </ItemGroup>
