@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <functional>
-#include  <winnt.h>
+#include <winnt.h>
 #include <Windows.h>
 #include <psapi.h>
 #include <unordered_set>
@@ -489,10 +489,9 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
 {
     CONTEXT context;
     HANDLE thread;
-    de->address = exceptionAddr;
     auto it = breakMap.find(exceptionAddr);
 
-    if (it == breakMap.end() && !isTrace && !isRun)
+    if (it == breakMap.end() && !isStep && !isRun)
         return DBG_EXCEPTION_NOT_HANDLED;
     
     
@@ -512,7 +511,7 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
         it->second.state = BreakState::disable;
 
     }
-    else if (it == breakMap.end() && isTrace == false)
+    else if (it == breakMap.end() && isStep == false)
     {
         context.EFlags |= 0x100;
         SetThreadContext(thread, &context);
@@ -532,30 +531,16 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
 #else
     context.Eip = exceptionAddr;
 #endif
-    isRun = false;
-    isTrace = false;
 
-    //de->type = DebugEvent::BreakpointEvent;
+
+    
+    this->cont = &context;
     de->context = context;
-    de->address = exceptionAddr;
-    eventCallback(*de);
 
-    while (!isRun && !isTrace)
-    {
-        if (!commandQueue.empty())
-        {
-            std::string cmd = waitForCommand();
-            if (!cmd.empty())
-            {
-                commandLine(cmd, context);
-
-            }
-        }
-    }
+    userRun();
 
 
-
-    if (isTrace)
+    if (isStep)
         context.EFlags |= 0x100;
     else
         context.EFlags &= ~0x100;
@@ -567,6 +552,27 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
 
 
     return DBG_CONTINUE;
+}
+
+void Debugger::userRun()
+{
+    isRun = false;
+    isStep = false;
+
+    //de->type = DebugEvent::BreakpointEvent;
+
+    while (!isRun && !isStep)
+    {
+        if (!commandQueue.empty())
+        {
+            std::string cmd = waitForCommand();
+            if (!cmd.empty())
+            {
+                commandLine(cmd);
+
+            }
+        }
+    }
 }
 
 std::string Debugger::waitForCommand()
@@ -581,24 +587,48 @@ std::string Debugger::waitForCommand()
 size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc)
 {
     DebugEvent de;
+    CONTEXT ctx;
+    HANDLE thread;
+
+    thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
+
+
+    if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
+    ctx.ContextFlags = CONTEXT_ALL;
+    if (!GetThreadContext(thread, &ctx)) return DBG_EXCEPTION_NOT_HANDLED;
+    cont = &ctx;
+    if (ctx.Eip >= startTrace && ctx.Eip <= endTrace)
+        isTracing = true;
+    
+    else
+        isTracing = false;
     switch (exc->ExceptionRecord.ExceptionCode)
     {
         case EXCEPTION_BREAKPOINT:
+            if (isTracing)
+            {
+                disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
+                cont->Eip = (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress;
+                auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
+                SetThreadContext(thread, &ctx);
+                CloseHandle(thread);
+                return ret;
+            }
             de.type = DebugEvent::BreakpointEvent;
             return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
 
         case EXCEPTION_SINGLE_STEP:
         {
-            CONTEXT ctx;
-            HANDLE thread;
 
-            thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, tid);
-
-
-            if (thread == INVALID_HANDLE_VALUE) return DBG_EXCEPTION_NOT_HANDLED;
-            ctx.ContextFlags = CONTEXT_ALL;
-            if (!GetThreadContext(thread, &ctx)) break;
-
+            if (isTracing)
+            {
+                disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
+                cont->Eip = (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress;
+                auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
+                SetThreadContext(thread, &ctx);
+                CloseHandle(thread);
+                return ret;
+            }
             int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
             if (drIndex != -1 && hwBps[drIndex].active)
             {
@@ -614,21 +644,23 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
                 ss << "[HWBP] Triggered at 0x" << std::hex << addr << " (DR" << drIndex << ")";
                 logger.debug(ss.str());
                 std::cout << ss.str() << std::endl;
-                isTrace = true;
+                isStep = true;
             #if defined(_WIN64)
                 DWORD_PTR currIp = ctx.Rip;
             #else
                 DWORD_PTR currIp = ctx.Eip;
             #endif
 
-                SetThreadContext(thread, &ctx);
-                CloseHandle(thread);
+
                 de.type = DebugEvent::HardwareBreak;
+                de.address = (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress;
                 size_t contFlag = breakpointEvent(tid, currIp, &de);
                 return contFlag;
             }
         }
         de.type = DebugEvent::Step;
+        de.address = (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress;
+
         return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
 
     default:
@@ -638,7 +670,7 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
 }
 
 
-void Debugger::commandLine(const std::string& command, CONTEXT& cont)
+void Debugger::commandLine(const std::string& command)
 {
    
     std::istringstream iss(command);
@@ -646,7 +678,7 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
     iss >> cmd;
 
     auto it = std::find_if(commands.begin(), commands.end(), [cmd](CommandInfo elem) {return elem.name == cmd; });
-    this->cont = &cont;
+   
     if (it != commands.end())
         it->handler(*this, iss);
     
@@ -656,7 +688,7 @@ void Debugger::commandLine(const std::string& command, CONTEXT& cont)
 
 void Debugger::handleTraceCommand()
 {
-    isTrace = true;
+    isStep = true;
     isRun = false;
 }
 
@@ -679,11 +711,9 @@ DWORD_PTR getAddr(std::istringstream& stream)
     }
 
     try {
-        // »спользуем stoull дл€ чтени€ 64-битного значени€
         size_t pos;
         uint64_t addr = std::stoull(addrStr, &pos, 16);
 
-        // ѕровер€ем, что вс€ строка была успешно прочитана
         if (pos != addrStr.size()) {
             std::cerr << "Invalid address format: " << addrStr << "\n";
             return 0;
@@ -1422,7 +1452,56 @@ void Debugger::initComands()
             {
                 dbg.handleStepOver();
             }
+        },
+        {
+            "trace",
+            "trace <start> <end>",
+            [](Debugger& dbg, std::istringstream& stream)
+            {
+                    std::string startStr, endStr;
+                    if (!(stream >> startStr >> endStr)) {
+                        dbg.eventCallback(DebugEvent{
+                            DebugEvent::InputError,
+                            0,
+                            "Usage: trace <start> <end>"
+                        });
+                        return;
+                    }
+                    DWORD_PTR start = dbg.getArgAddr(startStr);
+                    DWORD_PTR end = dbg.getArgAddr(endStr);
+                    if (!start || !end)
+                    {
+                            dbg.eventCallback(DebugEvent{
+                            DebugEvent::InputError,
+                            0,
+                            "Usage: trace <start> <end>"
+                        });
+                            return;
+                    }
+                    if (start > end)
+                    {
+                            dbg.eventCallback(DebugEvent{
+                            DebugEvent::InputError,
+                            0,
+                            "Usage: trace <start> <end>"
+                        });
+                            return;
+                    }
+                    dbg.startTrace = start;
+                    dbg.endTrace = end;
+                    dbg.logger.startTrace(start, end);
+                    if (dbg.cont->Eip >= start && dbg.cont->Eip <= end)
+                    {
+                        dbg.isTracing = true;
+                    }
+                    else
+                    {
+                        dbg.setBreakPoint(start, BreakType::software, true);
+                    }
+            }
+
         }
+
     };
 }
 
@@ -1631,7 +1710,7 @@ void Debugger::handleStepOver()
             isRun = true;
         }
         else
-            isTrace = true;
+            isStep = true;
     }
 
 }
@@ -1653,4 +1732,69 @@ DWORD_PTR Debugger::getRetAddr() {
         return retAddr;
     }
     return 0;
+}
+
+void Debugger::rangeStep()
+{
+#ifdef _WIN64
+    DWORD_PTR currIP = cont->Rip;
+#else
+    DWORD_PTR currIP = cont->Eip;
+#endif
+    if (currIP < startTrace || currIP > endTrace)
+    {
+        isRun = true;
+        isStep = false;
+        isTracing = false;
+        cont->EFlags &= ~0x100;
+        logger.endTrace();
+        return;
+    }
+    std::stringstream ss;
+    disasDebugProc(currIP, ss, 1);
+    logger.trace(ss.str(), cont);   
+}
+
+
+void Debugger::startTraceRange()
+{
+    isTracing = true;
+    isRun = false;
+    isStep = false;
+    cont->EFlags |= 0x100;
+    logger.startTrace(startTrace, endTrace);
+}
+
+
+size_t Debugger::traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de)
+{
+ 
+    
+        std::stringstream ss;
+        size_t len = disasDebugProc(exceptionAddr, ss, 1);
+        if (ss.str().find("call") != std::string::npos)
+        {
+            DWORD_PTR addr;
+            std::string call;
+            ss >> call >>  call >> call >> addr;
+            if (addr < startTrace || addr > endTrace)
+            {
+                setBreakPoint(exceptionAddr + len, BreakType::software, true);
+                isRun = true;
+            }
+        }
+
+        rangeStep();
+        return DBG_CONTINUE;
+    
+}
+
+void Debugger::disableBreakPoint(DWORD_PTR addr)
+{
+    auto it = breakMap.find(addr);
+    if (it != breakMap.end())
+    {
+        breakMap[addr].state = BreakState::disable;
+        WriteProcessMemory(hProcess, (PVOID)addr, &breakMap[addr].saveByte, 1, NULL);
+    }
 }

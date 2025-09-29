@@ -123,7 +123,7 @@ private:
     HANDLE hProcess;
     bool active = false;
     bool isRun = false;
-    bool isTrace = false;
+    bool isStep = false;
     Disassembler disas;
     std::unordered_map<std::string, Module> modules;
     std::unordered_map<DWORD, ActiveThread> threads;
@@ -147,6 +147,7 @@ private:
 
     void setBreakPoint(DWORD_PTR addr, BreakType type, bool temp);
     void deleteBreakPoint(DWORD_PTR addr);
+    void disableBreakPoint(DWORD_PTR addr);
 
     void printRegisters(const CONTEXT& context);
 
@@ -174,7 +175,7 @@ private:
         
     };
 
-    void commandLine(const std::string& command, CONTEXT& cont);
+    void commandLine(const std::string& command);
     void handleTraceCommand();
     void handleBpCommand(std::istringstream& stream);
     void handleDelCommand(std::istringstream& stream);
@@ -220,9 +221,16 @@ private:
     DWORD_PTR getRegisterValue(const std::string& regName);
     void pushEvent(const DebugEvent& ev);
     std::function<void(const DebugEvent&)> eventCallback;
-
-
     Logger logger;
+
+    void rangeStep();
+    bool isTracing = false;
+    DWORD_PTR startTrace = 5;
+    DWORD_PTR endTrace = 0;
+    void startTraceRange();
+
+    size_t traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de);
+    void userRun();
 
 public:
     void run();

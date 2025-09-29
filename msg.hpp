@@ -15,7 +15,7 @@ struct DisasmLine
 struct DebugEvent
 {
     enum Type {BreakpointEvent, BreakpointSetup, ModuleLoad, ProcessExit,
-        DisasmProg, DisasmCode, HardwareBreak, Step, Run, Error, StepOver} type;
+        DisasmProg, DisasmCode, HardwareBreak, InputError, Step, Run, Error, StepOver} type;
     DWORD_PTR address = 0;
     std::string message;
     std::vector<DisasmLine> disasmCode;
