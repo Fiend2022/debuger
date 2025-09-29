@@ -138,7 +138,7 @@ private:
 
 
 
-    size_t disasDebugProc(DWORD_PTR addr, size_t instCount = 5);
+    size_t disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t instCount = 5);
     std::vector<DisasmLine> disasSection(IMAGE_SECTION_HEADER* sec);
 
     std::pair<std::vector<DisasmLine>, std::vector<DisasmLine>> getSections();

@@ -23,8 +23,19 @@ private:
 	bool updateIP;
 	CONTEXT context;
 	DWORD_PTR currentEip = 0;
-	void setupDebuggerStyle();
 
+	char inputBuf[256] = "";
+	std::vector<std::string> commandHistory;
+	int historyPos = -1;
+	std::vector<std::string> consoleLines;
+
+
+	void addToConsole(const std::string& line);
+	void addCmdToHistory(const std::string& cmd);
+
+	void renderConsole();
+	int textInputCallback(ImGuiInputTextCallbackData* data);
+	void setupDebuggerStyle();
 	std::string selectedProgram;
 	std::function<void(const std::string&)> onProgramSelected;
 	std::queue<DebugEvent> msgQueue;

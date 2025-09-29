@@ -173,7 +173,7 @@ void Debugger::run()
     logger.close();
 }
 
-size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
+size_t Debugger::disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t instCount)
 {
     size_t size = 15 * instCount;
     std::vector<BYTE> buf(size);
@@ -195,7 +195,7 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, size_t instCount)
         if (!len) {
             break;
         }
-        std::cout << std::hex << (DWORD_PTR)addr + offset << ": " << hexBuf << " " << asmBuf << std::endl;
+        stream << std::hex << (DWORD_PTR)addr + offset << ": " << hexBuf << " " << asmBuf << std::endl;
         offset += len;
     }
 
@@ -399,7 +399,7 @@ void Debugger::debugRun()
             
             entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
             DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
-            disasDebugProc(entryAddr);
+            disasDebugProc(entryAddr, std::cout);
 
             ss << "Entry point address: 0x" << std::hex << entryAddr;
             std::cout << ss.str() << std::endl;
@@ -419,7 +419,7 @@ void Debugger::debugRun()
             de.address = (DWORD_PTR)entryPoint;
             de.disasmCode = sourceCode;
             de.data = data;
-            de.type = DebugEvent::DisasmReady;
+            de.type = DebugEvent::DisasmProg;
             eventCallback(de);
             break;
         }
@@ -519,7 +519,9 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
         CloseHandle(thread);
         return DBG_CONTINUE;
     }
-    disasDebugProc(exceptionAddr, 1);
+    std::stringstream ss;
+    disasDebugProc(exceptionAddr, ss, 1);
+    de->message = ss.str();
     if (it != breakMap.end())
     {
         if (it->second.temp)
@@ -1161,26 +1163,29 @@ void Debugger::initComands()
                     return;
                 }
 
-                dbg.disasDebugProc(addr, args.count);
+                std::stringstream ss;
+                DebugEvent de;
+                dbg.disasDebugProc(addr, ss, args.count);
+                de.type = DebugEvent::DisasmCode;
+                de.message = ss.str();
+                dbg.eventCallback(de);
             }
         },
 
         {
             "bp",
-            "bp <addres> [-t hw|hww|hwr]",
+            "bp <address>",
             [](Debugger& dbg, std::istringstream& stream)
             {
                 std::vector<std::string> types = { "hw", "hww", "hwr"};
                 CommandArgs args = dbg.parseArgs(stream);
                 if (!args.valid) return;
-
                 if (args.helpRequested)
                 {
-                    std::cout << "Use: bp <addres> [-t hw|hww|hwr]" << std::endl;
+                    std::cout << "Use: bp <address>" << std::endl;
                     return;
                 }
-                if (args.type == "d")
-                    dbg.setBreakPoint(args.address);
+                dbg.setBreakPoint(args.address);
             }
         },
 
@@ -1349,7 +1354,7 @@ void Debugger::initComands()
                         {
                             std::string type = (bp.type == BreakType::software) ? "soft" : "hard";
                             std::cout << n << ") " << type << ": ";
-                            dbg.disasDebugProc(addr, 1);
+                            dbg.disasDebugProc(addr, std::cout, 1);
                             n++;
                         }
                     }

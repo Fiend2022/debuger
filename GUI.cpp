@@ -89,8 +89,8 @@ void GUI::run()
         {
             switch (ev.type)
             {
-            case DebugEvent::DisasmReady:
-            //case DebugEvent::ModuleLoad:
+            case DebugEvent::DisasmProg:
+            case DebugEvent::ModuleLoad:
                 disasCode = ev.disasmCode;
                 data = ev.data;
                 currentEip = ev.address;
@@ -102,10 +102,13 @@ void GUI::run()
                 context = ev.context;
                 break;
             case DebugEvent::Step:
+            case DebugEvent::HardwareBreak:
                 currentEip = ev.address;
                 updateIP = true;
                 context = ev.context;
                 break;
+            case DebugEvent::DisasmCode:
+                addToConsole(ev.message);
             default:
                 break;
             }
@@ -149,6 +152,7 @@ void GUI::run()
 
             // --- Консоль ---
             ImGui::BeginChild("Console", ImVec2(0, consoleHeight), true);
+            renderConsole();
             ImGui::EndChild();
 
         }
@@ -234,7 +238,7 @@ bool GUI::openFilePicker()
         selectedProgram = utf8Path;
 
         if (onProgramSelected) 
-            onProgramSelected(selectedProgram);  // Уведомляем отладчик
+            onProgramSelected(selectedProgram);  
         return true;
     }
     return false;
@@ -546,4 +550,111 @@ void GUI::renderData()
         }
     }
     clipper.End();
+}
+
+void GUI::addToConsole(const std::string& line)
+{
+    consoleLines.push_back(line);
+}
+
+void GUI::addCmdToHistory(const std::string& cmd)
+{
+    if (!cmd.empty())
+    {
+        commandHistory.erase(
+            std::remove(commandHistory.begin(), commandHistory.end(), cmd),
+            commandHistory.end()
+        );
+        commandHistory.push_back(cmd);
+    }
+    historyPos = -1;
+}
+
+void GUI::renderConsole() {
+    ImGui::BeginChild("ConsoleOutput", ImVec2(0, -40), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
+    // Вывод всех строк
+    for (const auto& line : consoleLines) {
+        ImGui::TextUnformatted(line.c_str());
+    }
+
+    // Авто-скролл вниз
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        ImGui::SetScrollHereY(1.0f);
+
+    ImGui::EndChild();
+
+    // --- Поле ввода ---
+    ImGui::PushItemWidth(-1);
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue |
+        ImGuiInputTextFlags_CallbackHistory;
+
+    bool reclaimFocus = false;
+
+    if (ImGui::InputText("##console_input", inputBuf, IM_ARRAYSIZE(inputBuf), flags,
+        [](ImGuiInputTextCallbackData* data) -> int {
+            GUI* gui = (GUI*)data->UserData;
+            return gui->textInputCallback(data);
+        }, this))
+    {
+        if (strlen(inputBuf) > 0) {
+            std::string cmd(inputBuf);
+
+            // Добавляем в консоль
+            addToConsole("> " + cmd);
+            addCmdToHistory(cmd);
+
+            // Отправляем отладчику
+            if (commandCallback) {
+                commandCallback(cmd);
+            }
+
+            // Очищаем поле
+            inputBuf[0] = '\0';
+            reclaimFocus = true;
+        }
+    }
+
+    ImGui::PopItemWidth();
+
+    // Фокус после отправки
+    if (reclaimFocus) {
+        ImGui::SetKeyboardFocusHere(-1);
+    }
+}
+
+int GUI::textInputCallback(ImGuiInputTextCallbackData* data)
+{
+    switch (data->EventFlag) {
+    case ImGuiInputTextFlags_CallbackHistory:
+        if (commandHistory.empty()) return 0;
+
+        // Стрелка вверх
+        if (data->EventKey == ImGuiKey_UpArrow) {
+            if (historyPos == -1)
+                historyPos = (int)commandHistory.size() - 1;
+            else if (historyPos > 0)
+                historyPos--;
+
+            data->DeleteChars(0, data->BufTextLen);
+            data->InsertChars(0, commandHistory[historyPos].c_str());
+        }
+
+        // Стрелка вниз
+        else if (data->EventKey == ImGuiKey_DownArrow) {
+            if (historyPos != -1) {
+                historyPos++;
+                if (historyPos >= (int)commandHistory.size()) {
+                    historyPos = -1;
+                    data->DeleteChars(0, data->BufTextLen);
+                }
+                else {
+                    data->DeleteChars(0, data->BufTextLen);
+                    data->InsertChars(0, commandHistory[historyPos].c_str());
+                }
+            }
+        }
+        break;
+    }
+    return 0;
 }

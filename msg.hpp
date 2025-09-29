@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <Windows.h>
+#include <sstream>
 
 struct DisasmLine
 {
@@ -14,12 +15,11 @@ struct DisasmLine
 struct DebugEvent
 {
     enum Type {BreakpointEvent, BreakpointSetup, ModuleLoad, ProcessExit,
-        DisasmReady, HardwareBreak, Step, Run, Error, StepOver} type;
+        DisasmProg, DisasmCode, HardwareBreak, Step, Run, Error, StepOver} type;
     DWORD_PTR address = 0;
     std::string message;
     std::vector<DisasmLine> disasmCode;
     std::vector<DisasmLine> data;
     CONTEXT context;
-    
 
 };
