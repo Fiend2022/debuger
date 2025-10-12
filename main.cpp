@@ -1,21 +1,28 @@
 ﻿#include "debugger.hpp"
 #include "GUI.h"
+#include "Logger.hpp"
+#include "Observer.hpp"
+#include "EventPublisher.hpp"
 #include <thread>
 
 
 int main(int argc, char** argv, char** envp)
 {
     GUI gui;
+    Logger logger;
+    EventPublisher* publisher;
     Debugger debugger;
+    debugger.attach(&gui);
+    debugger.attach(&logger);
+    
 
+    
  
     gui.setCommandCallback([&debugger](const std::string& cmd) {
         debugger.sendCommand(cmd);
         });
 
-    debugger.setEventCallback([&gui](const DebugEvent& ev) {
-        gui.pushEvent(ev);
-        });
+
     std::thread debugThread(&Debugger::run, &debugger);
     gui.run();
     debugThread.join();

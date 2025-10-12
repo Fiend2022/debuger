@@ -157,3 +157,42 @@ void Logger::trace(const std::string& instruction, const CONTEXT* ctx)
 	traceFile << "--------------------------------------------------------------------------------\n";
 	traceFile.flush();
 }
+
+void Logger::update(const DebugEvent& ev)
+{
+	switch (ev.type)
+	{
+		
+	case DebugEvent::DbgWarning:
+		warning(ev.message);
+		break;
+	case DebugEvent::DbgError:
+		error(ev.message);
+		break;
+	case DebugEvent::BreakpointSetup:
+	case DebugEvent::ModuleLoad:
+	case DebugEvent::ModuleUnload:
+	case DebugEvent::CreateThread:
+	case DebugEvent::ExitThread:
+	case DebugEvent::HardBreakpointSetup:
+	case DebugEvent::Reg:
+	case DebugEvent::ProcessExit:
+	case DebugEvent::Run:
+
+		info(ev.message);
+		break;
+
+	case DebugEvent::SetupTrace:
+		startTrace(ev.startTrace, ev.endTrace);
+		break;
+
+	case DebugEvent::TraceStep:
+		trace(ev.message, &ev.context);
+		break;
+	case DebugEvent::CreateProc:
+		init(ev.prog);
+		break;
+	default:
+		break;
+	}
+}

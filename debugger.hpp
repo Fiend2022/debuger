@@ -16,37 +16,14 @@
 #include <condition_variable>
 #include <queue>
 #include "Logger.hpp"
+#include "EventPublisher.hpp"
 static const size_t lineSize = 16;
 
 
 
-class Debugger
+class Debugger : public EventPublisher
 {
 private:
-
-    //enum class Commands
-    //{
-    //    run, trace, setBP, delBP, disas, reg, chgMem, getMem, modules, threads, syms
-    //};
-    //std::unordered_map<std::string, Debugger::Commands> commands =
-    //{
-    //    {"run", Commands::run},
-    //    {"bp", Commands::setBP},
-    //    {"del", Commands::delBP},
-    //    {"g", Commands::trace},
-    //    {"dump", Commands::getMem},
-    //    {"edit", Commands::chgMem},
-    //    {"reg", Commands::reg},
-    //    {"disas", Commands::disas},
-    //    {"modules", Commands::modules},
-    //    {"threads", Commands::threads},
-    //    {"symbols", Commands::syms}
-
-    //};
-
-
-
-
 
     std::queue<std::string> commandQueue;
     std::mutex cmdMutex;
@@ -56,7 +33,8 @@ private:
     {
         std::string name;
         std::string usage;
-        std::function<void(Debugger&, std::istringstream&)> handler;
+        std::function<std::string(Debugger&, std::istringstream&)> handler;
+        DebugEvent::Type type;
     };
 
     std::vector<CommandInfo> commands;
@@ -66,11 +44,6 @@ private:
         disable, enable
     };
 
-    enum class BreakType {
-        software,
-        hardware_write,
-        hardware_access
-    };
 
     struct HwBreakpoint {
         bool active = false;
@@ -88,9 +61,9 @@ private:
     struct BreakPoint
     {
         BreakState state;
-        BreakType type;
         BYTE saveByte; 
         bool temp = false;
+        DWORD_PTR address = 0;
     };
 
 
@@ -141,21 +114,21 @@ private:
     size_t disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t instCount = 5);
     std::vector<DisasmLine> disasSection(IMAGE_SECTION_HEADER* sec);
 
-    std::pair<std::vector<DisasmLine>, std::vector<DisasmLine>> getSections();
-    std::vector<DisasmLine> getDataSection(IMAGE_SECTION_HEADER* sec);
+    std::pair<std::vector<DisasmLine>, std::vector<DataSection>> getSections();
+    std::vector<DataLine> getDataSection(IMAGE_SECTION_HEADER* sec);
     void parseCode(std::vector<DisasmLine>* code);
 
-    void setBreakPoint(DWORD_PTR addr, BreakType type, bool temp);
+    void setBreakPoint(DWORD_PTR addr, bool temp);
     void deleteBreakPoint(DWORD_PTR addr);
     void disableBreakPoint(DWORD_PTR addr);
 
-    void printRegisters(const CONTEXT& context);
+    void printRegisters(const CONTEXT& context, std::ostream& output);
 
     // Используем DWORD_PTR для значений регистров
     void changeRegisters(CONTEXT* context, const std::string& reg, DWORD_PTR value);
 
     // Используем DWORD_PTR для адресов памяти
-    void printMemory(DWORD_PTR addr, size_t size);
+    void printMemory(DWORD_PTR addr, std::ostream& stream, size_t size);
     std::vector<BYTE> getDumpMemory(DWORD_PTR addr, size_t size);
     void changeMemory(DWORD_PTR addr, void* value, size_t size);
 
@@ -176,15 +149,15 @@ private:
     };
 
     void commandLine(const std::string& command);
-    void handleTraceCommand();
+    //void handleStepCommand();
     void handleBpCommand(std::istringstream& stream);
     void handleDelCommand(std::istringstream& stream);
-    void handleDumpCommand(std::istringstream& stream);
-    void handleDisasCommand(std::istringstream& stream);
-    void handleEditCommand(std::istringstream& stream);
-    void handleRegCommand(std::istringstream& stream, CONTEXT& context);
-    void handleModulesCommand();
-    void handleThreadsCommand();
+    //void handleDumpCommand(std::istringstream& stream);
+    //void handleDisasCommand(std::istringstream& stream);
+    //void handleEditCommand(std::istringstream& stream);
+    void handleRegCommand(std::istringstream& stream, std::ostream& output, CONTEXT& context);
+    void handleModulesCommand(std::ostream& ss);
+    void handleThreadsCommand(std::ostream& ss);
     void handleSymbolsCommand();
     void handleStepOver();
     void handleStepOut();
@@ -219,9 +192,6 @@ private:
     CommandArgs parseArgs(std::istringstream& stream);
     bool isRegisterString(const std::string& str);
     DWORD_PTR getRegisterValue(const std::string& regName);
-    void pushEvent(const DebugEvent& ev);
-    std::function<void(const DebugEvent&)> eventCallback;
-    Logger logger;
 
     void rangeStep();
     bool isTracing = false;
@@ -232,11 +202,37 @@ private:
     size_t traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de);
     void userRun();
 
-public:
-    void run();
-    void setEventCallback(std::function<void(const DebugEvent&)> cb)
+
+    enum DebugState
     {
-        eventCallback = cb;
+        RUN, STOP, STEP, TRACING, TRACE_RUN
+    };
+    DebugState state = STOP;
+
+
+
+    std::vector<StackLine> getStack(const int numEntries);
+
+    DWORD_PTR getIP()
+    {
+#if defined(_WIN64)
+        return cont->Rip;
+#else
+        return cont->Eip;
+#endif
     }
+
+    void setIP(DWORD_PTR addr)
+    {
+#if defined(_WIN64)
+        cont->Rip = addr;
+#else
+        cont->Eip = addr;
+#endif
+    }
+
+public:
+    Debugger() = default;
+    void run();
     void sendCommand(const std::string& cmd);
 };

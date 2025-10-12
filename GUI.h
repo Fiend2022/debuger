@@ -14,7 +14,11 @@
 #include <mutex>
 #include <vector>
 #include <Windows.h>
-class GUI
+
+#include "Observer.hpp"
+
+class GUI : public Observer
+
 {
 private:
 	GLFWwindow* window;
@@ -22,7 +26,7 @@ private:
 	bool succesInit;
 	bool updateIP;
 	CONTEXT context;
-	DWORD_PTR currentEip = 0;
+	DWORD_PTR currentIP = 0;
 
 	char inputBuf[256] = "";
 	std::vector<std::string> commandHistory;
@@ -43,7 +47,9 @@ private:
 	bool openFilePicker();        
 	void renderToolbar();
 	std::vector<DisasmLine> disasCode;
-	std::vector<DisasmLine> data;
+	std::vector<DataSection> dataSections;
+	DataSection currentDataSection;
+	std::vector<StackLine> stack;
 	std::function<void(const std::string&)> commandCallback;
 	void renderDisassemblyCode();
 	void renderDisassemblyArea();
@@ -57,11 +63,14 @@ private:
 	};
 	Tab currentTab = Tab::Code;
 	void renderDebugButtons();
+	void renderStack();
+
 
 public:
 	GUI();
 	~GUI();
 
+	void update(const DebugEvent& de) override;
 	bool ready() { return succesInit; };
 	void run();
 	void pushEvent(const DebugEvent& event);

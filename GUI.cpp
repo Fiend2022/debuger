@@ -4,6 +4,23 @@
 #include <sstream>
 #include <iomanip>
 
+std::string formatHex(const std::vector<uint8_t>& buf) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < buf.size(); ++i) {
+        if (i > 0) oss << " ";
+        oss << std::setfill('0') << std::setw(2) << std::hex << (int)buf[i];
+    }
+    return oss.str();
+}
+
+std::string formatAscii(const std::vector<uint8_t>& buf) {
+    std::string ascii;
+    for (uint8_t b : buf) {
+        ascii += (b >= 32 && b < 127) ? (char)b : '.';
+    }
+    return ascii;
+}
+
 GUI::GUI()
 {
     if (!glfwInit()) return;
@@ -89,26 +106,38 @@ void GUI::run()
         {
             switch (ev.type)
             {
-            case DebugEvent::DisasmProg:
-            case DebugEvent::ModuleLoad:
+            case DebugEvent::CreateProc:
                 disasCode = ev.disasmCode;
-                data = ev.data;
-                currentEip = ev.address;
+                dataSections = ev.data;
+                currentDataSection = dataSections[0];
+                currentIP = ev.address;
                 updateIP = true;
-                break;
-            case DebugEvent::BreakpointEvent:
-                currentEip = ev.address;
-                updateIP = true;
-                context = ev.context;
+                stack = ev.stackData;
                 break;
             case DebugEvent::Step:
             case DebugEvent::HardwareBreak:
-                currentEip = ev.address;
+            case DebugEvent::BreakpointEvent:
+            case DebugEvent::StepOver:
+            case DebugEvent::StepOut:
+                currentIP = ev.address;
                 updateIP = true;
                 context = ev.context;
+                stack = ev.stackData;
                 break;
             case DebugEvent::DisasmCode:
-                addToConsole(ev.message);
+            case DebugEvent::BreakList:
+            case DebugEvent::ModList:
+            case DebugEvent::ThreadList:
+            case DebugEvent::Nope:
+            case DebugEvent::Dump:
+            case DebugEvent::BreakpointSetup:
+            case DebugEvent::Run:
+            case DebugEvent::HardBreakpointSetup:
+            case DebugEvent::SetupTrace:
+
+                if (!ev.message.empty())
+                    addToConsole(ev.message);
+                break;
             default:
                 break;
             }
@@ -273,7 +302,7 @@ void GUI::renderDisassemblyCode()
     {
         int targetIndex = -1;
         for (int i = 0; i < static_cast<int>(disasCode.size()); ++i) {
-            if (disasCode[i].address == currentEip) {
+            if (disasCode[i].address == currentIP) {
                 targetIndex = i;
                 break;
             }
@@ -327,7 +356,7 @@ void GUI::renderDisassemblyCode()
             if (line.hasBreakpoint) {
                 color = IM_COL32(255, 0, 0, 200);
             }
-            else if (line.address == currentEip) {
+            else if (line.address == currentIP) {
                 color = IM_COL32(0, 255, 0, 200);
             }
 
@@ -337,7 +366,7 @@ void GUI::renderDisassemblyCode()
             ImGui::SameLine();
 
             // Подсветка EIP
-            if (line.address == currentEip) {
+            if (line.address == currentIP) {
                 ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 0, 255));
             }
 
@@ -352,7 +381,7 @@ void GUI::renderDisassemblyCode()
 
             ImGui::TextUnformatted(oss.str().c_str());
 
-            if (line.address == currentEip) {
+            if (line.address == currentIP) {
                 ImGui::PopStyleColor();
             }
 
@@ -364,7 +393,8 @@ void GUI::renderDisassemblyCode()
 
 
 
-void GUI::renderDisassemblyArea() {
+void GUI::renderDisassemblyArea()
+{
     ImVec2 available = ImGui::GetContentRegionAvail();
 
     float tabBarHeight = 30.0f;
@@ -383,6 +413,12 @@ void GUI::renderDisassemblyArea() {
             currentTab = Tab::Data;
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Stack"))
+        {
+            currentTab = Tab::Stack;
+            ImGui::EndTabItem();
+        }
+
         ImGui::EndTabBar();
     }
     ImGui::EndChild();
@@ -396,6 +432,9 @@ void GUI::renderDisassemblyArea() {
         break;
     case Tab::Data:
         renderData();
+        break;
+    case Tab::Stack:
+        renderStack();
         break;
     }
 
@@ -525,31 +564,8 @@ void GUI::renderRegisters() {
     ImGui::Text("EFLAGS: %08X", context.EFlags);
 }
 
-void GUI::renderData()
-{
-    ImGuiListClipper clipper;
-    clipper.Begin(data.size()); 
+void GUI::renderData() {
 
-    while (clipper.Step())
-    {
-        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-        {
-            if (i >= data.size()) continue;
-            const auto& line = data[i];
-
-            if (line.address == currentEip)
-                ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 0, 255));
-           
-            std::stringstream ss;
-            ss << line.address << "\t" << line.bytes << "\t" << line.instruction;
-            ImGui::TextUnformatted(ss.str().c_str());
-
-            if (line.address == currentEip)
-                ImGui::PopStyleColor();
-            
-        }
-    }
-    clipper.End();
 }
 
 void GUI::addToConsole(const std::string& line)
@@ -657,4 +673,70 @@ int GUI::textInputCallback(ImGuiInputTextCallbackData* data)
         break;
     }
     return 0;
+}
+
+void GUI::update(const DebugEvent& de) 
+{
+    std::lock_guard<std::mutex> lock(msgMutex);
+    msgQueue.push(de);
+}
+
+
+void GUI::renderStack() {
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(stack.size()));
+
+    while (clipper.Step()) {
+        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+            if (i >= stack.size()) continue;
+            const auto& line = stack[i];
+
+            ImGui::PushID(i);
+
+            // Форматируем адрес и значение с использованием C++ потоков
+            std::ostringstream addrStream;
+            std::ostringstream valueStream;
+
+            // Настройка потоков
+            addrStream << std::hex << std::uppercase << std::setfill('0');
+            valueStream << std::hex << std::uppercase << std::setfill('0');
+
+            // Установка ширины в зависимости от разрядности
+#ifdef _WIN64
+            addrStream << std::setw(16) << line.address;
+            valueStream << std::setw(16) << line.value;
+#else
+            addrStream << std::setw(8) << line.address;
+            valueStream << std::setw(8) << line.value;
+#endif
+
+            // Выделяем текущий ESP/RSP
+            bool isCurrent = (line.address ==
+#ifdef _WIN64
+                context.Rsp
+#else
+                context.Esp
+#endif
+                );
+
+            if (isCurrent) {
+                ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 0, 255));
+                ImGui::Text("> %s: %s", addrStream.str().c_str(), valueStream.str().c_str());
+                ImGui::PopStyleColor();
+            }
+            else {
+                ImGui::Text("%s: %s", addrStream.str().c_str(), valueStream.str().c_str());
+            }
+
+            if (!line.label.empty()) {
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(100, 200, 100, 255));
+                ImGui::Text("  ; %s", line.label.c_str());
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::PopID();
+        }
+    }
+    clipper.End();
 }

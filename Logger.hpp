@@ -4,8 +4,9 @@
 #include <mutex>
 #include <chrono>
 #include <Windows.h>
+#include "Observer.hpp"
 
-class Logger
+class Logger : public Observer
 {
 private:
 	enum Level {DEBUG, INFO, TRACE, WARNING, ERR};
@@ -30,4 +31,6 @@ public:
 	bool startTrace(DWORD_PTR start, DWORD_PTR end);
 	void endTrace();
 	void trace(const std::string& instruction, const CONTEXT* ctx);
+	void update(const DebugEvent& de) override;
+
 };
