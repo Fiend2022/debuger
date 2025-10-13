@@ -134,6 +134,8 @@ void GUI::run()
             case DebugEvent::Run:
             case DebugEvent::HardBreakpointSetup:
             case DebugEvent::SetupTrace:
+            case DebugEvent::DbgError:
+            case DebugEvent::DbgWarning:
 
                 if (!ev.message.empty())
                     addToConsole(ev.message);

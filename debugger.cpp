@@ -50,7 +50,7 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     }
     if (idx == -1)
     {
-        //logger.warning("No free hardware breakpoint register (DR0-DR3)");
+
         return false;
     }
 
@@ -111,10 +111,8 @@ int Debugger::getHardwareBreakpointIndexFromDr6(DWORD dr6)
 bool Debugger::createDebugProc(const std::string& prog)
 {
     if (!fs::exists(prog)) 
-    {
-        //logger.error(std::string("Executable file not found: ")  + prog);
         return false;
-    }
+    
 
     STARTUPINFOA startupInfo;
     PROCESS_INFORMATION procInfo;
@@ -145,8 +143,7 @@ bool Debugger::createDebugProc(const std::string& prog)
         isRun = true;
         state = DebugState::RUN;
     }
-    else
-        //logger.error(std::string("Failed to create process: ") + std::to_string(GetLastError()));
+
     return ret;
     
 }
@@ -162,7 +159,6 @@ void Debugger::run()
             prog = waitForCommand();
             ready = true;
         }
-    //logger.init(prog);
     if (createDebugProc(prog))
     {
         DebugEvent de;
@@ -170,7 +166,13 @@ void Debugger::run()
         de.type = DebugEvent::ProcessExit;
         notify(de);
     }
-    //logger.close();
+    else
+    {
+        DebugEvent de;
+        de.message = std::string("Failed to create process: ") + prog;
+        de.type = DebugEvent::DbgError;
+        notify(de);
+    }
 }
 
 size_t Debugger::disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t instCount)
@@ -181,9 +183,7 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t ins
 
     if (!ReadProcessMemory(hProcess, (LPCVOID)addr, buf.data(), size, NULL))
     {
-        std::stringstream ss;
-        ss << "Failed to read memory: " << GetLastError() << " on address: " << addr;
-        //logger.error(ss.str());
+        stream << "Failed to read memory: " << GetLastError() << " on address: " << addr;
         return 0;
     }
 
@@ -195,23 +195,26 @@ size_t Debugger::disasDebugProc(DWORD_PTR addr, std::ostream& stream, size_t ins
         if (!len) {
             break;
         }
-        stream << std::hex << (DWORD_PTR)addr + offset << ": " << hexBuf << " " << asmBuf << std::endl;
+        stream << std::hex << (DWORD_PTR)addr + offset << ": " << hexBuf << " " << asmBuf;
         offset += len;
     }
 
     return offset;
 }
 
-void Debugger::setBreakPoint(DWORD_PTR addr, bool temp = false)
+bool Debugger::setBreakPoint(DWORD_PTR addr, bool temp = false)
 {
     auto it = breakMap.find(addr);
     if (it == breakMap.end())
     {
         BYTE saveByte;
-        ReadProcessMemory(hProcess, (PVOID)addr, &saveByte, 1, NULL);
-        WriteProcessMemory(hProcess, (PVOID)addr, "\xCC", 1, NULL);
+        if (!ReadProcessMemory(hProcess, (PVOID)addr, &saveByte, 1, NULL))
+            return false;
+        if (!WriteProcessMemory(hProcess, (PVOID)addr, "\xCC", 1, NULL))
+            return false;
         breakMap[addr] = { BreakState::enable, saveByte, temp, addr };
     }
+    return true;
 }
 
 void Debugger::deleteBreakPoint(DWORD_PTR addr)
@@ -227,7 +230,6 @@ void Debugger::deleteBreakPoint(DWORD_PTR addr)
     {
         std::stringstream ss;
         ss << "No breakpoint found at 0x" << std::hex << addr;
-        //logger.warning(ss.str());
     }
 
 }
@@ -388,7 +390,7 @@ void Debugger::debugRun()
             case CREATE_PROCESS_DEBUG_EVENT:
             {
                 DebugEvent de;
-                std::stringstream ss;
+                std::stringstream ss, disasError;
                 ss << "Process created: " << std::hex << debugEvent.dwProcessId;
                 std::cout << ss.str() << std::endl;
 
@@ -402,7 +404,13 @@ void Debugger::debugRun()
             
                 entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
                 DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
-                disasDebugProc(entryAddr, std::cout);
+                if (!disasDebugProc(entryAddr, disasError))
+                {
+                    DebugEvent event;
+                    event.message = disasError.str();
+                    event.type = DebugEvent::DbgWarning;
+                    notify(event);
+                }
 
 
                 initComands();
@@ -548,7 +556,7 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
         return DBG_CONTINUE;
     }
     std::stringstream ss;
-    disasDebugProc(exceptionAddr, ss, 1);
+    //disasDebugProc(exceptionAddr, ss, 1);
     de->message = ss.str();
     if (it != breakMap.end())
     {
@@ -631,6 +639,12 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
                 disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
                 setIP((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
                 auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
+                de.type = DebugEvent::TraceStep;
+                std::stringstream ss;
+                disasDebugProc(getIP(), ss, 1);
+                de.context = *cont;
+                de.message = ss.str();
+                notify(de);
                 SetThreadContext(thread, &ctx);
                 CloseHandle(thread);
                 return ret;
@@ -646,6 +660,12 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
                 disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
                 setIP((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
                 auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
+                de.type = DebugEvent::TraceStep;
+                std::stringstream ss;
+                disasDebugProc(getIP(), ss, 1);
+                de.context = *cont;
+                de.message = ss.str();
+                notify(de);
                 SetThreadContext(thread, &ctx);
                 CloseHandle(thread);
                 return ret;
@@ -701,17 +721,29 @@ void Debugger::commandLine(const std::string& command)
    
     if (it != commands.end())
     {
-        std::string output = it->handler(*this, iss);
-        auto type = it->type;
-        DebugEvent de;
+        try {
+            std::string output = it->handler(*this, iss);
+            auto type = it->type;
+            DebugEvent de;
 
-        de.address = getIP();
-        de.context = *cont;
-        de.type = type;
-        de.message = output;
-        de.stackData = getStack(64);
-        std::tie(de.disasmCode, de.data) = getSections();
-        notify(de);
+            de.address = getIP();
+            de.context = *cont;
+            de.type = type;
+            de.message = output;
+            de.stackData = getStack(64);
+            de.startTrace = startTrace;
+            de.endTrace = endTrace;
+            //std::tie(de.disasmCode, de.data) = getSections();
+            notify(de);
+        }
+        catch (const std::exception& e)
+        {
+            DebugEvent de;
+            de.address = getIP();
+            de.type = DebugEvent::DbgError;
+            de.message = e.what();
+            notify(de);
+        }
     }
     
 
@@ -1253,8 +1285,11 @@ void Debugger::initComands()
                     std::cout << "Use: bp <address>" << std::endl;
                     return std::string("Use: bp <address>");
                 }
-                dbg.setBreakPoint(args.address);
-                return std::string("");
+                if (!dbg.setBreakPoint(args.address))
+                    throw  std::runtime_error("Failed to setup BreakPoint");
+                std::stringstream ss;
+                ss << args.address;
+                return ss.str();
             },
              DebugEvent::Type::BreakpointSetup
         },
@@ -1295,29 +1330,34 @@ void Debugger::initComands()
                     }
 
                     std::vector<BYTE> data(args.value.begin(), args.value.end());
+                    try
+                    {
+                        auto it = dbg.dataSize.find(args.type);
+                        if (it != dbg.dataSize.end())
+                        {
+                            uint64_t hexNum;
+                            std::istringstream(args.value) >> std::hex >> hexNum;
+                            dbg.changeMemory(args.address, &hexNum, dbg.dataSize[args.type]);
+                        }
 
-                    auto it = dbg.dataSize.find(args.type);
-                    if (it != dbg.dataSize.end())
-                    {
-                        uint64_t hexNum;
-                        std::istringstream(args.value) >> std::hex >> hexNum;
-                        dbg.changeMemory(args.address, &hexNum, dbg.dataSize[args.type]);
+                        else if (args.type == "str" && it == dbg.dataSize.end())
+                        {
+                            data.push_back('\0');
+                            dbg.changeMemory(args.address, data.data(), data.size());
+                        }
+                        else
+                        {
+                            std::stringstream ss;
+                            ss << "Error: incorrect data type\n"
+                                << "Use: edit <addr|symbol|reg> [-t <byte|word|dword|string>] -v <value>\n" << std::endl;
+                            return ss.str();
+                        }
                     }
-                    
-                    else if (args.type == "str" && it == dbg.dataSize.end())
+                    catch (const std::exception& e)
                     {
-                        data.push_back('\0');
-                        dbg.changeMemory(args.address, data.data(), data.size());
+                        throw std::runtime_error(e.what());
                     }
-                    else
-                    {
-                        std::stringstream ss;
-                        ss << "Error: incorrect data type\n"
-                            << "Use: edit <addr|symbol|reg> [-t <byte|word|dword|string>] -v <value>\n" << std::endl;
-                        return ss.str();
-                    }
-
-                    return " ";
+                    return "";
 
                 },
                  DebugEvent::Type::Nope
@@ -1462,8 +1502,12 @@ void Debugger::initComands()
 
                 DWORD_PTR addr = dbg.getArgAddr(addrStr);
                 if (!addr) return "";
-                dbg.addHardwareBreakpoint(addr, typeStr, size);
-                return "";
+                if(dbg.addHardwareBreakpoint(addr, typeStr, size))
+                    return "";
+                else
+                {
+                    return "No free hardware breakpoint register (DR0-DR3)";
+                }
             },
             DebugEvent::Type::BreakpointSetup
         },
@@ -1543,15 +1587,27 @@ void Debugger::initComands()
                     }
                     dbg.startTrace = start;
                     dbg.endTrace = end;
-                    //dbg.logger.startTrace(start, end);
                     if (dbg.getIP() >= start && dbg.getIP() <= end)
-                    {
                         dbg.state = dbg.DebugState::TRACING;
-                    }
+                    
                     else
                     {
-                        dbg.setBreakPoint(start, true);
-                        dbg.setBreakPoint(end, true);
+                        
+                            
+                        if (!dbg.setBreakPoint(start, true))
+                        {
+                            std::stringstream errMsg;
+                            errMsg << "Failed to setup BreakPoint on start of range: " << start;
+                            throw  std::runtime_error(errMsg.str());
+                        }
+                        
+                        if (!dbg.setBreakPoint(end, true))
+                        {
+                            std::stringstream errMsg;
+                            errMsg << "Failed to setup BreakPoint on end of range: " << start;
+                            throw  std::runtime_error(errMsg.str());
+                        }
+
                     }
                     return "";
             },
@@ -1792,7 +1848,6 @@ void Debugger::rangeStep()
     }
     std::stringstream ss;
     disasDebugProc(currIP, ss, 1);
-    //logger.trace(ss.str(), cont);   
 }
 
 
@@ -1800,7 +1855,6 @@ void Debugger::startTraceRange()
 {
     state = TRACING;
     cont->EFlags |= 0x100;
-    //logger.startTrace(startTrace, endTrace);
 }
 
 
@@ -1865,9 +1919,6 @@ std::vector<StackLine> Debugger::getStack(const int numEntries = 64)
             
             else if (i == 1)
                 line.label = "<saved ebp>";
-            
-
-            
 
             stackLines.push_back(line);
         }

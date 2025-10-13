@@ -146,6 +146,7 @@
     <ClCompile Include="..\..\imgui-master\imgui_tables.cpp" />
     <ClCompile Include="..\..\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="debugger.cpp" />
+    <ClCompile Include="debug_api.cpp" />
     <ClCompile Include="EventPublisher.cpp" />
     <ClCompile Include="GUI.cpp" />
     <ClCompile Include="Logger.cpp" />
@@ -156,6 +157,7 @@
     <ClInclude Include="..\..\imgui-master\imgui.h" />
     <ClInclude Include="argh.h" />
     <ClInclude Include="debugger.hpp" />
+    <ClInclude Include="debug_api.hpp" />
     <ClInclude Include="disas.hpp" />
     <ClInclude Include="EventPublisher.hpp" />
     <ClInclude Include="GUI.h" />

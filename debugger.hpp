@@ -17,6 +17,8 @@
 #include <queue>
 #include "Logger.hpp"
 #include "EventPublisher.hpp"
+#include "debug_api.hpp"
+
 static const size_t lineSize = 16;
 
 
@@ -24,6 +26,8 @@ static const size_t lineSize = 16;
 class Debugger : public EventPublisher
 {
 private:
+
+    friend class DebugApi;
 
     std::queue<std::string> commandQueue;
     std::mutex cmdMutex;
@@ -118,14 +122,14 @@ private:
     std::vector<DataLine> getDataSection(IMAGE_SECTION_HEADER* sec);
     void parseCode(std::vector<DisasmLine>* code);
 
-    void setBreakPoint(DWORD_PTR addr, bool temp);
+    bool setBreakPoint(DWORD_PTR addr, bool temp);
     void deleteBreakPoint(DWORD_PTR addr);
     void disableBreakPoint(DWORD_PTR addr);
 
     void printRegisters(const CONTEXT& context, std::ostream& output);
 
     // Используем DWORD_PTR для значений регистров
-    void changeRegisters(CONTEXT* context, const std::string& reg, DWORD_PTR value);
+    // void changeRegisters(CONTEXT* context, const std::string& reg, DWORD_PTR value);
 
     // Используем DWORD_PTR для адресов памяти
     void printMemory(DWORD_PTR addr, std::ostream& stream, size_t size);

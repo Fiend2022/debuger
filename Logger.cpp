@@ -2,7 +2,7 @@
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
-
+#include <algorithm>
 
 void Logger::init(const std::string& prog)
 {
@@ -86,7 +86,7 @@ bool Logger::startTrace(DWORD_PTR start, DWORD_PTR end)
 	{
 		traceFile << "# Instruction Trace\n";
 		traceFile << "# Range: 0x" << std::hex << start << " - 0x" << end << "\n";
-		traceFile << "# Time       EIP         Bytes              Mnemonic               Registers\n";
+		traceFile << "# Time\t\tEIP\t\tBytes\t\t\t\Mnemonic\t\t\tRegisters\n";
 		traceFile << "#----------------------------------------------------------------------------------------\n";
 		traceFile.flush();
 	}
@@ -106,58 +106,81 @@ void Logger::trace(const std::string& instruction, const CONTEXT* ctx)
 {
 	if (!traceFile.is_open()) return;
 
+	// --- Время ---
 	auto now = std::chrono::system_clock::now();
 	auto time_t = std::chrono::system_clock::to_time_t(now);
 	std::tm tm;
 	localtime_s(&tm, &time_t);
-	char timeBuf[16];
-	strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &tm);
-	std::string eip, bytes, mnem;
-	std::stringstream ss (instruction);
-	ss >> eip >> bytes >> mnem;
+
+	std::ostringstream timeStream;
+	timeStream << std::put_time(&tm, "%H:%M:%S");
 
 #ifdef _WIN64
-#define REG_FMT "%016llX"
+	constexpr int regWidth = 16;
 #else
-#define REG_FMT "%08X"
+	constexpr int regWidth = 8;
 #endif
 
-	// Первая строка: время, EIP, байты, мнемоника
+	auto fmtReg = [](uint32_t val, int width) -> std::string {
+		std::ostringstream oss;
+		oss << std::hex << std::uppercase << std::setfill('0') << std::setw(width) << val;
+		return oss.str();
+		};
+
+	// --- Разбиваем instruction на части ---
+	std::istringstream iss(instruction);
+	std::string eip, bytes, mnem;
+	iss >> eip >> bytes;  // первые два токена — адрес и байты
+	getline(iss, mnem);  // всё остальное — мнемоника (с пробелами)
+
+	// Удаляем пробелы в начале мнемоники
+	mnem.erase(0, mnem.find_first_not_of(" \t"));
+
+	// --- Формируем первую строку ---
+	std::stringstream ss;
+	ss << "[" << timeStream.str() << "]      " << eip << "         " << bytes
+		<< "              " << mnem + "               ";
+	size_t firstLineLen = ss.str().length();
+
+	// --- Записываем первую строку ---
+	traceFile << ss.str();
+
+	// --- Регистры: EAX EBX сразу после инструкции ---
 	traceFile
-		<< "[" << timeBuf << "] "
-		<< "0x" << std::setfill('0') << std::setw(8) << std::hex << eip << ": "
-		<< std::left << std::setw(16) << bytes << " "
-		<< mnem << " ; ";
+		<< "EAX=" << fmtReg(ctx->Eax, regWidth)
+		<< " EBX=" << fmtReg(ctx->Ebx, regWidth);
 
-	// Регистры: первая пара — сразу после инструкции
-	traceFile
-		<< "EAX=" << REG_FMT << ctx->Eax
-		<< " EBX=" << REG_FMT << ctx->Ebx;
-
-	traceFile << "\n";  // переход на новую строку для оставшихся регистров
-
-	// Вторая строка: оставшиеся регистры
-	traceFile
-		<< std::setw(55) << ""  // отступ (под временем + EIP)
-		<< "ECX=" << REG_FMT << ctx->Ecx
-		<< " EDX=" << REG_FMT << ctx->Edx << "\n"
-		<< std::setw(55) << ""
-		<< "ESI=" << REG_FMT << ctx->Esi
-		<< " EDI=" << REG_FMT << ctx->Edi << "\n"
-		<< std::setw(55) << ""
-		<< "EBP=" << REG_FMT << ctx->Ebp
-		<< " ESP=" << REG_FMT << ctx->Esp << "\n"
-		<< std::setw(55) << ""
-		<< "EFLAGS=" << REG_FMT << ctx->EFlags;
-
-#undef REG_FMT
-
-	// Разделитель
 	traceFile << "\n";
-	traceFile << "--------------------------------------------------------------------------------\n";
+
+	// --- Остальные регистры с отступом ---
+	// Отступ = длина первой строки - длина части до " ; "
+	size_t indent = firstLineLen + 4;
+	if (indent < 0) indent = 0;
+
+	// Форматируем регистры
+	std::string regLine1 = "ECX=" + fmtReg(ctx->Ecx, regWidth) + " EDX=" + fmtReg(ctx->Edx, regWidth);
+	std::string regLine2 = "ESI=" + fmtReg(ctx->Esi, regWidth) + " EDI=" + fmtReg(ctx->Edi, regWidth);
+	std::string regLine3 = "EBP=" + fmtReg(ctx->Ebp, regWidth) + " ESP=" + fmtReg(ctx->Esp, regWidth);
+	std::string regLine4 = "EFLAGS=" + fmtReg(ctx->EFlags, regWidth);
+
+	// Длина самой длинной строки регистров
+	//size_t maxRegLen = std::max({ regLine1.length(), regLine2.length(), regLine3.length(), regLine4.length() });
+
+	// Выравнивание по левому краю с отступом
+	traceFile
+		<< std::setw(indent) << ""  // отступ
+		<< regLine1 << "\n"
+		<< std::setw(indent) << ""
+		<< regLine2 << "\n"
+		<< std::setw(indent) << ""
+		<< regLine3 << "\n"
+		<< std::setw(indent) << ""
+		<< regLine4;
+
+	// --- Разделитель ---
+	traceFile << "\n--------------------------------------------------------------------------------\n";
 	traceFile.flush();
 }
-
 void Logger::update(const DebugEvent& ev)
 {
 	switch (ev.type)

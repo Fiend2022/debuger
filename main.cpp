@@ -10,7 +10,6 @@ int main(int argc, char** argv, char** envp)
 {
     GUI gui;
     Logger logger;
-    EventPublisher* publisher;
     Debugger debugger;
     debugger.attach(&gui);
     debugger.attach(&logger);
