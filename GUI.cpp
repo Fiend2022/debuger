@@ -3,7 +3,7 @@
 #include <commdlg.h>
 #include <sstream>
 #include <iomanip>
-
+#include <algorithm>
 std::string formatHex(const std::vector<uint8_t>& buf) {
     std::ostringstream oss;
     for (size_t i = 0; i < buf.size(); ++i) {

@@ -4,6 +4,7 @@
 #include "Observer.hpp"
 #include "EventPublisher.hpp"
 #include <thread>
+#include "DebugAPI.hpp"
 
 
 int main(int argc, char** argv, char** envp)
@@ -11,6 +12,9 @@ int main(int argc, char** argv, char** envp)
     GUI gui;
     Logger logger;
     Debugger debugger;
+    InitDebugAPI(&debugger);
+
+
     debugger.attach(&gui);
     debugger.attach(&logger);
     

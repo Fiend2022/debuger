@@ -146,18 +146,19 @@
     <ClCompile Include="..\..\imgui-master\imgui_tables.cpp" />
     <ClCompile Include="..\..\imgui-master\imgui_widgets.cpp" />
     <ClCompile Include="debugger.cpp" />
-    <ClCompile Include="debug_api.cpp" />
+    <ClCompile Include="DebugAPI.cpp" />
     <ClCompile Include="EventPublisher.cpp" />
     <ClCompile Include="GUI.cpp" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="pe.cpp" />
+    <ClCompile Include="pluginManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\imgui-master\imgui.h" />
     <ClInclude Include="argh.h" />
     <ClInclude Include="debugger.hpp" />
-    <ClInclude Include="debug_api.hpp" />
+    <ClInclude Include="DebugAPI.hpp" />
     <ClInclude Include="disas.hpp" />
     <ClInclude Include="EventPublisher.hpp" />
     <ClInclude Include="GUI.h" />
@@ -165,6 +166,8 @@
     <ClInclude Include="msg.hpp" />
     <ClInclude Include="Observer.hpp" />
     <ClInclude Include="pe.hpp" />
+    <ClInclude Include="pluginManager.hpp" />
+    <ClInclude Include="pluginAPI.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

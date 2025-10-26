@@ -35,7 +35,7 @@ struct DebugEvent
 {
     enum Type {StartDebbug, BreakpointEvent, BreakpointSetup, HardBreakpointSetup, ModuleLoad, ProcessExit, CreateThread, ExitThread, ModuleUnload, DbgStr,
         Dump, Reg, ModList, ThreadList, BreakList, HwBreakList, CreateProc, DisasmCode, HardwareBreak,
-        InputError, Step, Run, DbgError, DbgWarning, StepOver, StepOut, Nope, SetupTrace, TraceStep} type;
+        InputError, Step, Run, DbgError, DbgWarning, StepOver, StepOut, Nope, SetupTrace, TraceStep, LoadPlug} type;
     DWORD_PTR address = 0;
     std::string message;
     std::vector<DisasmLine> disasmCode;

@@ -17,17 +17,18 @@
 #include <queue>
 #include "Logger.hpp"
 #include "EventPublisher.hpp"
-#include "debug_api.hpp"
+#include "DebugAPI.hpp"
+#include "pluginManager.hpp"
 
 static const size_t lineSize = 16;
 
 
-
+ 
 class Debugger : public EventPublisher
 {
 private:
-
-    friend class DebugApi;
+    friend struct DebugAPI;
+    PluginManager plugManager;
 
     std::queue<std::string> commandQueue;
     std::mutex cmdMutex;
@@ -60,6 +61,7 @@ private:
 
 
     bool addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr, int size);
+    bool delHardwareBreakpoint(DWORD_PTR addr);
     int getHardwareBreakpointIndexFromDr6(DWORD dr6);
 
     struct BreakPoint
@@ -235,6 +237,7 @@ private:
 #endif
     }
 
+    bool regEdit(const std::string& reg, CONTEXT& context, DWORD_PTR value);
 public:
     Debugger() = default;
     void run();

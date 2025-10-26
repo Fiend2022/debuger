@@ -100,6 +100,27 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     return true;
 }
 
+bool Debugger::delHardwareBreakpoint(DWORD_PTR addr)
+{
+    auto it = std::find_if(std::begin(hwBps), std::end(hwBps),
+        [addr](const HwBreakpoint& bp) { return bp.active && bp.address == addr; });
+
+    if (it == std::end(hwBps))
+        return false;
+
+    int index = it - hwBps;
+
+    if (index == 0) cont->Dr0 = 0;
+    else if (index == 1) cont->Dr0 = 0;
+    else if (index == 2) cont->Dr0 = 0;
+    else if (index == 3) cont->Dr0 = 0;
+
+    uint32_t mask = ~(0b1111 << (index * 2));
+    mask &= ~(0b11 << (16 + index * 2));
+    cont->Dr7 &= mask;
+    return true;
+}
+
 int Debugger::getHardwareBreakpointIndexFromDr6(DWORD dr6)
 {
     for (int i = 0; i < 4; ++i)
@@ -162,6 +183,10 @@ void Debugger::run()
     if (createDebugProc(prog))
     {
         DebugEvent de;
+        std::string path = std::filesystem::current_path().string() + "\\plugins";
+        if (!(std::filesystem::exists(path) && std::filesystem::is_directory(path)))
+            std::filesystem::create_directory(path);
+        //plugManager.loadPluginsFromDir(path);
         debugRun();
         de.type = DebugEvent::ProcessExit;
         notify(de);
@@ -822,24 +847,8 @@ void Debugger::handleDelCommand(std::istringstream& stream)
 
 
 
-void Debugger::handleRegCommand(std::istringstream& input, std::ostream& output, CONTEXT& context)
+bool Debugger::regEdit(const std::string& reg, CONTEXT& context, DWORD_PTR value)
 {
-    std::string regName;
-    DWORD_PTR value;  
-
-    if (input.peek() == EOF) {
-        printRegisters(context, output);
-        return;
-    }
-
-    // Читаем имя регистра и значение
-    input >> regName;
-    if (!(input >> std::hex >> value)) {
-        output << "Invalid value format. Expected hexadecimal value.\n";
-        return;
-    }
-
-    // Определяем маппинг регистров в зависимости от разрядности
 #ifdef _WIN64
     // 64-битные регистры и их части
     static const std::unordered_map<std::string, std::function<void(CONTEXT&, DWORD_PTR)>> regMap = {
@@ -933,18 +942,40 @@ void Debugger::handleRegCommand(std::istringstream& input, std::ostream& output,
         {"dh", [](CONTEXT& ctx, DWORD_PTR val) { ctx.Edx = (ctx.Edx & 0xFFFF00FF) | ((val & 0xFF) << 8); }},
     };
 #endif
-
-    // Поиск и изменение регистра
-    auto it = regMap.find(regName);
+    auto it = regMap.find(reg);
     if (it != regMap.end())
     {
         it->second(context, value);
-        output << "Register " << regName << " updated to 0x" << std::hex << value << std::endl;
+        return true;
     }
     else
-    {
-        output << "Unknown register: " << regName << "\n";
+        return false;
+
+}
+
+
+void Debugger::handleRegCommand(std::istringstream& input, std::ostream& output, CONTEXT& context)
+{
+    std::string regName;
+    DWORD_PTR value;  
+
+    if (input.peek() == EOF) {
+        printRegisters(context, output);
+        return;
     }
+
+    // Читаем имя регистра и значение
+    input >> regName;
+    if (!(input >> std::hex >> value)) {
+        output << "Invalid value format. Expected hexadecimal value.\n";
+        return;
+    }
+
+
+    if (regEdit(regName, context, value))
+        output << "Register " << regName << " updated to 0x" << std::hex << value << std::endl;
+    else
+        output << "Unknown register: " << regName << "\n";
 }
 
 void Debugger::handleExitThread(DWORD pid, DWORD tid, DWORD exitCode)
@@ -1525,8 +1556,24 @@ void Debugger::initComands()
         },
         {
             "load",
-            "load <programm",
+            "load <plugin>",
             [](Debugger& dbg, std::istringstream& stream) -> std::string
+            {
+                std::string plug;
+                stream >> plug;
+                auto plugFile = std::filesystem::directory_entry(plug);
+                if (plugFile.exists())
+                    dbg.plugManager.loadPlugin(plugFile);
+                else
+                    throw std::exception("This plugin file was not found!");
+                return plugFile.path().filename().string();
+            },
+            DebugEvent::Type::LoadPlug
+        },
+        { 
+            "start",
+            "start <program>",
+            [](Debugger& dbg, std::istringstream& stream)-> std::string
             {
                 std::string prog;
                 stream >> prog;
@@ -1935,3 +1982,4 @@ std::vector<StackLine> Debugger::getStack(const int numEntries = 64)
 
     return stackLines;
 }
+
