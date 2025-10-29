@@ -145,7 +145,8 @@
     <ClCompile Include="..\..\imgui-master\imgui_draw.cpp" />
     <ClCompile Include="..\..\imgui-master\imgui_tables.cpp" />
     <ClCompile Include="..\..\imgui-master\imgui_widgets.cpp" />
-    <ClCompile Include="debugger.cpp" />
+    <ClCompile Include="DebugCore.cpp" />
+    <ClCompile Include="DebugCTL.cpp" />
     <ClCompile Include="DebugAPI.cpp" />
     <ClCompile Include="EventPublisher.cpp" />
     <ClCompile Include="GUI.cpp" />
@@ -156,6 +157,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\imgui-master\imgui.h" />
+    <ClInclude Include="AnnaDbgAPI.h" />
     <ClInclude Include="argh.h" />
     <ClInclude Include="debugger.hpp" />
     <ClInclude Include="DebugAPI.hpp" />

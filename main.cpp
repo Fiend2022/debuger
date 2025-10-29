@@ -17,14 +17,10 @@ int main(int argc, char** argv, char** envp)
 
     debugger.attach(&gui);
     debugger.attach(&logger);
-    
-
-    
- 
+   
     gui.setCommandCallback([&debugger](const std::string& cmd) {
         debugger.sendCommand(cmd);
         });
-
 
     std::thread debugThread(&Debugger::run, &debugger);
     gui.run();

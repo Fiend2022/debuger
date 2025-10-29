@@ -1,5 +1,6 @@
 #include "DebugAPI.hpp"
 #include "debugger.hpp"
+#include "msg.hpp"
 
 static Debugger* debug = nullptr;
 
@@ -38,6 +39,9 @@ public:
     // Memmory functions
     static std::vector<BYTE> dbg_dump(DWORD_PTR addr, size_t size);
     static bool dbg_memoryEdit(DWORD_PTR addr, void* value, size_t size);
+
+    // Event publishing functions
+    static void dbg_notify(const DebugEvent& de);
 };
 
 
@@ -149,6 +153,12 @@ bool DebugAPI::dbg_deleteHwBreakPoint(DWORD_PTR addr)
     
 }
 
+void DebugAPI::dbg_notify(const DebugEvent& de)
+{
+    if (debug)
+        debug->notify(de);
+}
+
 Debugger::HwBreakpoint* DebugAPI::dbg_getHwBpList()
 {
     if (debug)
@@ -167,27 +177,27 @@ void DebugAPI::dbg_step()
 }
 void DebugAPI::dbg_stepOver()
 {
-    if (debug)
-        debug->handleStepOver();
+    if (debug) debug->stepOver();
 }
 
 void DebugAPI::dbg_stepOut()
 {
-    if (debug)
-        debug->handleStepOut();
+    if (debug) debug->stepOut();
 }
 
 
 void DebugAPI::dbg_run()
 {
-    if (debug)
-        debug->state = Debugger::RUN;
+    if (debug) debug->state = Debugger::RUN;
 }
 
 void DebugAPI::dbg_stop()
 {
     if (debug)
+    {
         debug->state = Debugger::STOP;
+        debug->active = false;
+    }
 }
 
 bool API__setBP(DWORD_PTR addr)
@@ -278,6 +288,11 @@ void* API__getThreads()
     return (void*)DebugAPI::dbg_getThreads();
 }
 
+void API__notify(const CDebugEvent* de)
+{
+    DebugAPI::dbg_notify(*de);
+}
+
 
 static DebugCAPI gCAPI =
 {
@@ -286,7 +301,7 @@ static DebugCAPI gCAPI =
     API__step, API__stepOver, API__stepOut, API__run, API__stop,
     API__getContext, API__chgReg, 
     API__memDump, API__memEdit,
-    API__getModules, API__getThreads
+    API__getModules, API__getThreads, API__notify
 };
 
 extern "C" const DebugCAPI* get_debug_api()

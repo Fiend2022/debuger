@@ -102,85 +102,7 @@ void Logger::endTrace()
 		traceFile.close();
 }
 
-void Logger::trace(const std::string& instruction, const CONTEXT* ctx)
-{
-	if (!traceFile.is_open()) return;
 
-	// --- Время ---
-	auto now = std::chrono::system_clock::now();
-	auto time_t = std::chrono::system_clock::to_time_t(now);
-	std::tm tm;
-	localtime_s(&tm, &time_t);
-
-	std::ostringstream timeStream;
-	timeStream << std::put_time(&tm, "%H:%M:%S");
-
-#ifdef _WIN64
-	constexpr int regWidth = 16;
-#else
-	constexpr int regWidth = 8;
-#endif
-
-	auto fmtReg = [](uint32_t val, int width) -> std::string {
-		std::ostringstream oss;
-		oss << std::hex << std::uppercase << std::setfill('0') << std::setw(width) << val;
-		return oss.str();
-		};
-
-	// --- Разбиваем instruction на части ---
-	std::istringstream iss(instruction);
-	std::string eip, bytes, mnem;
-	iss >> eip >> bytes;  // первые два токена — адрес и байты
-	getline(iss, mnem);  // всё остальное — мнемоника (с пробелами)
-
-	// Удаляем пробелы в начале мнемоники
-	mnem.erase(0, mnem.find_first_not_of(" \t"));
-
-	// --- Формируем первую строку ---
-	std::stringstream ss;
-	ss << "[" << timeStream.str() << "]      " << eip << "         " << bytes
-		<< "              " << mnem + "               ";
-	size_t firstLineLen = ss.str().length();
-
-	// --- Записываем первую строку ---
-	traceFile << ss.str();
-
-	// --- Регистры: EAX EBX сразу после инструкции ---
-	traceFile
-		<< "EAX=" << fmtReg(ctx->Eax, regWidth)
-		<< " EBX=" << fmtReg(ctx->Ebx, regWidth);
-
-	traceFile << "\n";
-
-	// --- Остальные регистры с отступом ---
-	// Отступ = длина первой строки - длина части до " ; "
-	size_t indent = firstLineLen + 4;
-	if (indent < 0) indent = 0;
-
-	// Форматируем регистры
-	std::string regLine1 = "ECX=" + fmtReg(ctx->Ecx, regWidth) + " EDX=" + fmtReg(ctx->Edx, regWidth);
-	std::string regLine2 = "ESI=" + fmtReg(ctx->Esi, regWidth) + " EDI=" + fmtReg(ctx->Edi, regWidth);
-	std::string regLine3 = "EBP=" + fmtReg(ctx->Ebp, regWidth) + " ESP=" + fmtReg(ctx->Esp, regWidth);
-	std::string regLine4 = "EFLAGS=" + fmtReg(ctx->EFlags, regWidth);
-
-	// Длина самой длинной строки регистров
-	//size_t maxRegLen = std::max({ regLine1.length(), regLine2.length(), regLine3.length(), regLine4.length() });
-
-	// Выравнивание по левому краю с отступом
-	traceFile
-		<< std::setw(indent) << ""  // отступ
-		<< regLine1 << "\n"
-		<< std::setw(indent) << ""
-		<< regLine2 << "\n"
-		<< std::setw(indent) << ""
-		<< regLine3 << "\n"
-		<< std::setw(indent) << ""
-		<< regLine4;
-
-	// --- Разделитель ---
-	traceFile << "\n--------------------------------------------------------------------------------\n";
-	traceFile.flush();
-}
 void Logger::update(const DebugEvent& ev)
 {
 	switch (ev.type)
@@ -218,4 +140,87 @@ void Logger::update(const DebugEvent& ev)
 	default:
 		break;
 	}
+}
+
+void Logger::trace(const std::string& instruction, const CONTEXT* ctx)
+{
+	if (!traceFile.is_open()) return;
+
+	// --- Время ---
+	auto now = std::chrono::system_clock::now();
+	auto time_t = std::chrono::system_clock::to_time_t(now);
+	std::tm tm;
+	localtime_s(&tm, &time_t);
+
+	std::ostringstream timeStream;
+	timeStream << std::put_time(&tm, "%H:%M:%S");
+
+#ifdef _WIN64
+	constexpr int regWidth = 16;
+	auto getRax = [](const CONTEXT* c) { return c->Rax; };
+	auto getRbx = [](const CONTEXT* c) { return c->Rbx; };
+	auto getRcx = [](const CONTEXT* c) { return c->Rcx; };
+	auto getRdx = [](const CONTEXT* c) { return c->Rdx; };
+	auto getRsi = [](const CONTEXT* c) { return c->Rsi; };
+	auto getRdi = [](const CONTEXT* c) { return c->Rdi; };
+	auto getRbp = [](const CONTEXT* c) { return c->Rbp; };
+	auto getRsp = [](const CONTEXT* c) { return c->Rsp; };
+	auto getEFlags = [](const CONTEXT* c) { return c->EFlags; };
+#else
+	constexpr int regWidth = 8;
+	auto getRax = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Eax); };
+	auto getRbx = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Ebx); };
+	auto getRcx = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Ecx); };
+	auto getRdx = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Edx); };
+	auto getRsi = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Esi); };
+	auto getRdi = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Edi); };
+	auto getRbp = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Ebp); };
+	auto getRsp = [](const CONTEXT* c) { return static_cast<uint64_t>(c->Esp); };
+	auto getEFlags = [](const CONTEXT* c) { return static_cast<uint64_t>(c->EFlags); };
+#endif
+
+	// Форматирование регистра как HEX строки
+	auto fmtReg = [regWidth](uint64_t val) -> std::string {
+		std::ostringstream oss;
+		oss << std::hex << std::uppercase << std::setfill('0') << std::setw(regWidth) << val;
+		return oss.str();
+		};
+
+	// --- Разбиваем instruction на части ---
+	std::istringstream iss(instruction);
+	std::string eip, bytes, mnem;
+	iss >> eip >> bytes;
+	std::getline(iss, mnem);
+	mnem.erase(0, mnem.find_first_not_of(" \t"));
+
+	// --- Первая строка: инструкция ---
+	std::ostringstream ss;
+	ss << "[" << timeStream.str() << "]      " << eip << "         " << bytes
+		<< "              " << mnem << "               ";
+	std::string firstLine = ss.str();
+	traceFile << firstLine;
+
+	// --- Регистры: RAX, RBX сразу после инструкции ---
+	traceFile
+		<< "RAX=" << fmtReg(getRax(ctx))
+		<< " RBX=" << fmtReg(getRbx(ctx));
+
+	traceFile << "\n";
+
+	// --- Остальные регистры с отступом ---
+	size_t indent = firstLine.length();
+	if (indent > 1000) indent = 40; // защита от переполнения
+
+	auto writeIndented = [&](const std::string& line) {
+		traceFile << std::string(indent, ' ') << line << "\n";
+		};
+
+	writeIndented("RCX=" + fmtReg(getRcx(ctx)) + " RDX=" + fmtReg(getRdx(ctx)));
+	writeIndented("RSI=" + fmtReg(getRsi(ctx)) + " RDI=" + fmtReg(getRdi(ctx)));
+	writeIndented("RBP=" + fmtReg(getRbp(ctx)) + " RSP=" + fmtReg(getRsp(ctx)));
+	writeIndented("RFLAGS=" + fmtReg(getEFlags(ctx)));
+
+	// --- Разделитель ---
+	traceFile << "\n--------------------------------------------------------------------------------\n";
+	traceFile.flush();
 }

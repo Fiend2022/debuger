@@ -38,7 +38,7 @@ PluginManager::~PluginManager()
 void PluginManager::loadPlugin(const std::filesystem::directory_entry& file)
 {
 
-    HMODULE hMod = LoadLibrary(file.path().c_str());
+    HMODULE hMod = LoadLibraryA(file.path().string().c_str());
     if (!hMod) return;
 
     auto getApi = (PluginAPI(*)()) GetProcAddress(hMod, "get_plugin_api");

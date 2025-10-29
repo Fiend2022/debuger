@@ -566,8 +566,70 @@ void GUI::renderRegisters() {
     ImGui::Text("EFLAGS: %08X", context.EFlags);
 }
 
-void GUI::renderData() {
+void GUI::renderData()
+{
+    if (dataSections.empty()) {
+        ImGui::Text("No data sections available.");
+        return;
+    }
 
+    // Убедимся, что индекс валиден
+    if (currentDataTabIndex < 0 || currentDataTabIndex >= static_cast<int>(dataSections.size())) {
+        currentDataTabIndex = 0;
+    }
+
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float tabBarHeight = 30.0f;
+
+    // --- Tab Bar для секций ---
+    ImGui::BeginChild("DataTabBar", ImVec2(0, tabBarHeight), true);
+    if (ImGui::BeginTabBar("##DataSections", ImGuiTabBarFlags_FittingPolicyScroll)) {
+        for (int i = 0; i < static_cast<int>(dataSections.size()); ++i) {
+            const char* name = dataSections[i].secName.c_str();
+            // BeginTabItem возвращает true, если вкладка выбрана (и нужно отрендерить содержимое)
+            if (ImGui::BeginTabItem(name)) {
+                // Если мы здесь — пользователь переключился на эту вкладку
+                if (currentDataTabIndex != i) {
+                    currentDataTabIndex = i;
+                    currentDataSection = dataSections[i];
+                }
+                ImGui::EndTabItem();
+            }
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::EndChild();
+
+    // --- Содержимое текущей секции ---
+    ImGui::BeginChild("DataContent", ImVec2(0, avail.y - tabBarHeight), false);
+
+    const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(currentDataSection.data.size()), lineHeight);
+
+    while (clipper.Step()) {
+        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+            if (i >= static_cast<int>(currentDataSection.data.size())) continue;
+            const auto& line = currentDataSection.data[i];
+
+            std::ostringstream addrStream;
+#ifdef _WIN64
+            addrStream << std::hex << std::uppercase << std::setfill('0') << std::setw(16) << line.address;
+#else
+            addrStream << std::hex << std::uppercase << std::setfill('0') << std::setw(8) << line.address;
+#endif
+
+            std::string hexBytes = formatHex(line.bytes);
+            std::string ascii = line.ascii.empty() ? formatAscii(line.bytes) : line.ascii;
+
+            ImGui::Text("%s: %s", addrStream.str().c_str(), hexBytes.c_str());
+            ImGui::SameLine();
+            ImGui::Text("  ; %s", ascii.c_str());
+        }
+    }
+    clipper.End();
+
+    ImGui::EndChild();
 }
 
 void GUI::addToConsole(const std::string& line)

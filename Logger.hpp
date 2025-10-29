@@ -18,7 +18,7 @@ private:
 	std::ofstream logFile;
 	std::ofstream traceFile;
 
-	std::string logDirName = "logs";
+	std::string logDirName = "G:\\debuger\\logs";
 	std::tm getCurTM();
 
 public:

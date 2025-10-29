@@ -1,8 +1,13 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <vector>
 #include <Windows.h>
 #include <sstream>
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // =============== C-структуры (оставляем как есть) ===============
 struct CDisasmLine
@@ -59,6 +64,81 @@ struct CDebugEvent
     DWORD_PTR endTrace = 0;
     char* prog;
 };
+
+
+typedef struct DebugCAPI DebugCAPI;
+
+typedef bool (*dbg_set_bp_fn)(DWORD_PTR addr);
+typedef void (*dbg_del_bp_fn)(DWORD_PTR addr);
+typedef void* (*dbg_get_bp_list_fn)(void);
+
+typedef bool (*dbg_set_hw_bp_fn)(DWORD_PTR addr, const char* type, size_t size);
+typedef bool (*dbg_del_hw_bp_fn)(DWORD_PTR addr);
+typedef void* (*dbg_get_hw_bp_list_fn)(void);
+
+typedef void (*dbg_step_fn)(void);
+typedef void (*dbg_step_over_fn)(void);
+typedef void (*dbg_step_out_fn)(void);
+typedef void (*dbg_run_fn)(void);
+typedef void (*dbg_stop_fn)(void);
+
+typedef CONTEXT* (*dbg_get_context_fn)(void);
+typedef bool (*dbg_change_reg_fn)(const char* reg, DWORD_PTR value);
+
+typedef size_t (*dbg_mem_dump_fn)(DWORD_PTR addr, void* output, size_t size);
+typedef bool (*dbg_mem_edit_fn)(DWORD_PTR addr, void* input, size_t size);
+
+typedef void* (*dbg_get_modules_fn)(void);
+typedef void* (*dbg_get_threads_fn)(void);
+typedef void (*dbg_notify)(const CDebugEvent* de);
+
+struct DebugCAPI {
+    dbg_set_bp_fn setBP;
+    dbg_del_bp_fn delBP;
+    dbg_get_bp_list_fn getBpList;
+
+    dbg_set_hw_bp_fn setHwBP;
+    dbg_del_hw_bp_fn delHwBP;
+    dbg_get_hw_bp_list_fn getHwBpList;
+
+    dbg_step_fn step;
+    dbg_step_over_fn stepOver;
+    dbg_step_out_fn stepOut;
+    dbg_run_fn run;
+    dbg_stop_fn stop;
+
+    dbg_get_context_fn getCont;
+    dbg_change_reg_fn chgReg;
+
+    dbg_mem_dump_fn memDump;
+    dbg_mem_edit_fn memEdit;
+
+    dbg_get_modules_fn getMods;
+    dbg_get_threads_fn getThreads;
+	dbg_notify notify;
+};
+
+typedef bool (*plugin_init_fn)(const DebugCAPI* host_api);
+typedef void (*plugin_shutdown_fn)(void);
+
+typedef struct PluginAPI {
+    plugin_init_fn init;
+    plugin_shutdown_fn shutdown;
+} PluginAPI;
+
+// Экспортируется ПЛАГИНОМ
+__declspec(dllexport) PluginAPI get_plugin_api(void);
+
+// Экспортируется ЯДРОМ (debugger_core.dll)
+const DebugCAPI* get_debug_api(void);
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+
 
 // =============== C++-структуры с конструкторами из C ===============
 

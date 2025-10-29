@@ -1,6 +1,6 @@
 #pragma once
 #include <Windows.h>
-
+#include "msg.hpp"
 
 class Debugger;
 void InitDebugAPI(Debugger* dbg);
@@ -30,6 +30,11 @@ struct DebugCAPI
 
     void* (*getMods)();
     void* (*getThreads)();
+
+    void (*sendMessage)(const CDebugEvent* de);
+
+
+
 };
 
 
@@ -37,7 +42,6 @@ struct DebugCAPI
     extern "C" {
 #endif
     __declspec(dllexport) const DebugCAPI* get_debug_api();
-
 #ifdef __cplusplus
 }
 #endif

@@ -5,8 +5,10 @@
 #include <istream>
 #include <vector>
 
-
-
+//#ifdef _WIN64
+//typedef IMAGE_SECTION_64HEADER SECTION
+//#else
+//#endif
 class PeHeader {
 
 

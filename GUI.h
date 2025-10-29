@@ -27,7 +27,7 @@ private:
 	bool updateIP;
 	CONTEXT context;
 	DWORD_PTR currentIP = 0;
-
+	size_t currentDataTabIndex = 0;
 	char inputBuf[256] = "";
 	std::vector<std::string> commandHistory;
 	int historyPos = -1;
