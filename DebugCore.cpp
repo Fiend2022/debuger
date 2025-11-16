@@ -10,6 +10,7 @@
 #include <Windows.h>
 #include <psapi.h>
 #include <unordered_set>
+#include "msg.hpp"
 
 namespace fs = std::filesystem;
 
@@ -28,8 +29,8 @@ void setDr7Bit(DWORD_PTR& dr7, int index, int rw, int len)
     int lenShift = 18 + index * 4;    // lenx
 
     dr7 |= (1 << enableShift);           // Lx = 1
-    dr7 &= ~(3 << rwShift);              // обнуляем RWx
-    dr7 &= ~(3 << lenShift);             // обнуляем lenx
+    dr7 &= ~ (3 << rwShift);              // обнуляем RWx
+    dr7 &= ~ (3 << lenShift);             // обнуляем lenx
     dr7 |= (rw << rwShift);              // ставим RWx
     dr7 |= (len << lenShift);            // ставим lenx
 }
@@ -568,4 +569,10 @@ size_t Debugger::disasmDebugProc(DWORD_PTR addr, std::ostream& stream, size_t in
 
     return offset;
 }
+
+bool Debugger::launch(const std::string& prog)
+{
+    return createDebugProc(prog);
+}
+
 

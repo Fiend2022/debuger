@@ -10,7 +10,6 @@
 #include <sstream>
 #include <functional>
 #include <map>
-#include "msg.hpp"
 #include "pe.hpp"
 #include <mutex>
 #include <condition_variable>
@@ -23,16 +22,16 @@
 static const size_t lineSize = 16;
 
 
- 
+
 class Debugger : public EventPublisher
 {
 private:
     friend struct DebugAPI;
     PluginManager plugManager;
 
-//Core functional:
+    //Core functional:
 
-    //BreakPoint functional
+        //BreakPoint functional
     bool setBreakPoint(DWORD_PTR addr, bool temp = false);
     void deleteBreakPoint(DWORD_PTR addr);
     void disableBreakPoint(DWORD_PTR addr);
@@ -42,7 +41,7 @@ private:
     bool delHardwareBreakpoint(DWORD_PTR addr);
     int getHardwareBreakpointIndexFromDr6(DWORD dr6);
 
-    
+
     enum class BreakState
     {
         disable, enable
@@ -57,7 +56,7 @@ private:
     };
     struct HwBreakpoint {
         bool active = false;
-        DWORD_PTR address = 0; 
+        DWORD_PTR address = 0;
         int size = 0; // 1, 2, 4, 8
     };   // They work differently, that's why they are different entities.
 
@@ -149,10 +148,10 @@ private:
     bool createDebugProc(const std::string& prog);
 
 
-//Controller functional
+    //Controller functional
 
 
-    //cmd-shell
+        //cmd-shell
     struct CommandInfo
     {
         std::string name;
@@ -185,7 +184,7 @@ private:
         #ifdef _WIN64
         {"dq", 8} // Добавляем 64-битный размер данных только для 64-битной сборки
         #endif
-        
+
     };
 
     void commandLine(const std::string& command);
@@ -244,9 +243,12 @@ private:
 
 
 
-    
+
 public:
+    bool launch(const std::string& prog);
+    void debugLoop();
     Debugger() = default;
     void run();
     void sendCommand(const std::string& cmd);
 };
+

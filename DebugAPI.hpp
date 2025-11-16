@@ -3,7 +3,19 @@
 #include "msg.hpp"
 
 class Debugger;
+class DebugObserver;
+
 void InitDebugAPI(Debugger* dbg);
+
+
+struct CDebugObserver
+{
+    void* userData;
+    void (*update)(const CDebugEvent* de);
+    char* plugName;
+};
+
+void notifyAllCObservers(const DebugEvent& ev);
 
 struct DebugCAPI
 {
@@ -32,14 +44,16 @@ struct DebugCAPI
     void* (*getThreads)();
 
     void (*sendMessage)(const CDebugEvent* de);
+    void (*attachObserver)(CDebugObserver* obs);
+    void (*detachObserver)(CDebugObserver* obs);
 
-
-
+    bool (*launchProg)(const char* prog);
+    void (*dbgLoop)();
 };
 
 
 #ifdef __cplusplus
-    extern "C" {
+extern "C" {
 #endif
     __declspec(dllexport) const DebugCAPI* get_debug_api();
 #ifdef __cplusplus

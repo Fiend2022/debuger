@@ -2,22 +2,21 @@
 #include <string>
 #include <vector>
 #include <Windows.h>
-#include <sstream>
 
-// =============== C-структуры (оставляем как есть) ===============
+// === Объявления структур (без конструкторов/деструкторов) ===
 struct CDisasmLine
 {
     DWORD_PTR address;
     char* bytes;
     char* instruction;
-    bool hasBreakpoint = false;
+    bool hasBreakpoint;
 };
 
 struct CDataLine
 {
     DWORD_PTR address;
     BYTE* bytes;
-    size_t bytes_size;   // ← вы уже добавили
+    size_t bytesSize;
     char* ascii;
 };
 
@@ -25,7 +24,7 @@ struct CDataSection
 {
     char* secName;
     CDataLine* data;
-    size_t data_count;   // ← вы уже добавили
+    size_t dataCount;
 };
 
 struct CStackLine
@@ -45,23 +44,40 @@ typedef enum
 struct CDebugEvent
 {
     CDebugEventType type;
-    DWORD_PTR address = 0;
+    DWORD_PTR address;
     char* message;
     CDisasmLine* disasmCode;
-    size_t disasmCode_count;  // ← вы уже добавили
+    size_t disasmCodeCount;
     CDataSection* data;
-    size_t data_count;        // ← вы уже добавили
+    size_t dataCount;
     CStackLine* stackData;
-    size_t stackData_count;   // ← вы уже добавили
+    size_t stackDataCount;
     CONTEXT context;
-
-    DWORD_PTR startTrace = 0;
-    DWORD_PTR endTrace = 0;
+    DWORD_PTR startTrace;
+    DWORD_PTR endTrace;
     char* prog;
 };
 
-// =============== C++-структуры с конструкторами из C ===============
+// === Функции инициализации ===
+void initCDisasmLine(struct CDisasmLine* line);
+void initCDataLine(struct CDataLine* line);
+void initCDataSection(struct CDataSection* section);
+void initCStackLine(struct CStackLine* line);
+void initCDebugEvent(struct CDebugEvent* event);
 
+// === Функции освобождения ===
+void freeCDisasmLine(struct CDisasmLine* line);
+void freeCDataLine(struct CDataLine* line);
+void freeCDataSection(struct CDataSection* section);
+void freeCStackLine(struct CStackLine* line);
+void freeCDebugEvent(struct CDebugEvent* event);
+
+// === Функции копирования ===
+void copyCDisasmLine(struct CDisasmLine* dst, const struct CDisasmLine* src);
+void copyCDataLine(struct CDataLine* dst, const struct CDataLine* src);
+void copyCDataSection(struct CDataSection* dst, const struct CDataSection* src);
+void copyCStackLine(struct CStackLine* dst, const struct CStackLine* src);
+void copyCDebugEvent(struct CDebugEvent* dst, const struct CDebugEvent* src);
 struct DisasmLine
 {
     DWORD_PTR address;
@@ -97,7 +113,7 @@ struct DataLine
     // Конструктор из CDataLine
     DataLine(const CDataLine& c)
         : address(c.address)
-        , bytes(c.bytes ? c.bytes : nullptr, c.bytes + (c.bytes ? c.bytes_size : 0))
+        , bytes(c.bytes ? c.bytes : nullptr, c.bytes + (c.bytes ? c.bytesSize : 0))
         , ascii(c.ascii ? c.ascii : "")
     {
     }
@@ -118,9 +134,9 @@ struct DataSection
         : secName(c.secName ? c.secName : "")
         , data()
     {
-        if (c.data && c.data_count > 0) {
-            data.reserve(c.data_count);
-            for (size_t i = 0; i < c.data_count; ++i) {
+        if (c.data && c.dataCount > 0) {
+            data.reserve(c.dataCount);
+            for (size_t i = 0; i < c.dataCount; ++i) {
                 data.emplace_back(c.data[i]);
             }
         }
@@ -174,27 +190,31 @@ struct DebugEvent
         , prog(c.prog ? c.prog : "")
     {
         // disasmCode
-        if (c.disasmCode && c.disasmCode_count > 0) {
-            disasmCode.reserve(c.disasmCode_count);
-            for (size_t i = 0; i < c.disasmCode_count; ++i) {
+        if (c.disasmCode && c.disasmCodeCount > 0) {
+            disasmCode.reserve(c.disasmCodeCount);
+            for (size_t i = 0; i < c.disasmCodeCount; ++i) {
                 disasmCode.emplace_back(c.disasmCode[i]);
             }
         }
 
         // data
-        if (c.data && c.data_count > 0) {
-            data.reserve(c.data_count);
-            for (size_t i = 0; i < c.data_count; ++i) {
+        if (c.data && c.dataCount > 0) {
+            data.reserve(c.dataCount);
+            for (size_t i = 0; i < c.dataCount; ++i) {
                 data.emplace_back(c.data[i]);
             }
         }
 
         // stackData
-        if (c.stackData && c.stackData_count > 0) {
-            stackData.reserve(c.stackData_count);
-            for (size_t i = 0; i < c.stackData_count; ++i) {
+        if (c.stackData && c.stackDataCount > 0) {
+            stackData.reserve(c.stackDataCount);
+            for (size_t i = 0; i < c.stackDataCount; ++i) {
                 stackData.emplace_back(c.stackData[i]);
             }
         }
     }
 };
+
+
+
+

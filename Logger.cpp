@@ -3,7 +3,7 @@
 #include <sstream>
 #include <filesystem>
 #include <algorithm>
-
+#include "msg.hpp"
 void Logger::init(const std::string& prog)
 {
 	std::stringstream ss;

@@ -17,7 +17,7 @@
 
 #include "Observer.hpp"
 
-class GUI : public Observer
+class GUI : public DebugObserver
 
 {
 private:
@@ -44,7 +44,7 @@ private:
 	std::function<void(const std::string&)> onProgramSelected;
 	std::queue<DebugEvent> msgQueue;
 	std::mutex msgMutex;
-	bool openFilePicker();        
+	bool openFilePicker();
 	void renderToolbar();
 	std::vector<DisasmLine> disasCode;
 	std::vector<DataSection> dataSections;
@@ -79,3 +79,4 @@ public:
 		commandCallback = cb;
 	}
 };
+

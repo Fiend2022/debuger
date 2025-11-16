@@ -60,6 +60,9 @@
     <ClCompile Include="DebugCore.cpp">
       <Filter>Файлы ресурсов</Filter>
     </ClCompile>
+    <ClCompile Include="msg.cpp">
+      <Filter>Файлы ресурсов</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="debugger.hpp">
@@ -104,5 +107,8 @@
     <ClInclude Include="AnnaDbgAPI.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="AnnaDbg.py" />
   </ItemGroup>
 </Project>

@@ -6,10 +6,10 @@
 #include <Windows.h>
 #include "Observer.hpp"
 
-class Logger : public Observer
+class Logger : public DebugObserver
 {
 private:
-	enum Level {DEBUG, INFO, TRACE, WARNING, ERR};
+	enum Level { DEBUG, INFO, TRACE, WARNING, ERR };
 	void write(const Level lvl, const std::string& msg);
 	std::string getCurTime();
 	std::string getCurTimestamp();

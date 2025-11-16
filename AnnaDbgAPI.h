@@ -5,135 +5,168 @@
 #include <sstream>
 
 
+
+class DebugObserver;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// =============== C-структуры (оставляем как есть) ===============
-struct CDisasmLine
-{
-    DWORD_PTR address;
-    char* bytes;
-    char* instruction;
-    bool hasBreakpoint = false;
-};
+    // =============== C-структуры (оставляем как есть) ===============
+    struct CDisasmLine
+    {
+        DWORD_PTR address;
+        char* bytes;
+        char* instruction;
+        bool hasBreakpoint = false;
+    };
 
-struct CDataLine
-{
-    DWORD_PTR address;
-    BYTE* bytes;
-    size_t bytes_size;   // ← вы уже добавили
-    char* ascii;
-};
+    struct CDataLine
+    {
+        DWORD_PTR address;
+        BYTE* bytes;
+        size_t bytesSize;   // ← вы уже добавили
+        char* ascii;
+    };
 
-struct CDataSection
-{
-    char* secName;
-    CDataLine* data;
-    size_t data_count;   // ← вы уже добавили
-};
+    struct CDataSection
+    {
+        char* secName;
+        CDataLine* data;
+        size_t dataCount;   // ← вы уже добавили
+    };
 
-struct CStackLine
-{
-    DWORD_PTR address;
-    DWORD_PTR value;
-    char* label;
-};
+    struct CStackLine
+    {
+        DWORD_PTR address;
+        DWORD_PTR value;
+        char* label;
+    };
 
-typedef enum
-{
-    CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
-    Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
-    InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
-} CDebugEventType;
+    typedef enum
+    {
+        CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
+        Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
+        InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
+    } CDebugEventType;
 
-struct CDebugEvent
-{
-    CDebugEventType type;
-    DWORD_PTR address = 0;
-    char* message;
-    CDisasmLine* disasmCode;
-    size_t disasmCode_count;  // ← вы уже добавили
-    CDataSection* data;
-    size_t data_count;        // ← вы уже добавили
-    CStackLine* stackData;
-    size_t stackData_count;   // ← вы уже добавили
-    CONTEXT context;
+    struct CDebugEvent
+    {
+        CDebugEventType type;
+        DWORD_PTR address = 0;
+        char* message;
+        CDisasmLine* disasmCode;
+        size_t disasmCodeCount;  // ← вы уже добавили
+        CDataSection* data;
+        size_t dataCount;        // ← вы уже добавили
+        CStackLine* stackData;
+        size_t stackDataCount;   // ← вы уже добавили
+        CONTEXT context;
 
-    DWORD_PTR startTrace = 0;
-    DWORD_PTR endTrace = 0;
-    char* prog;
-};
-
-
-typedef struct DebugCAPI DebugCAPI;
-
-typedef bool (*dbg_set_bp_fn)(DWORD_PTR addr);
-typedef void (*dbg_del_bp_fn)(DWORD_PTR addr);
-typedef void* (*dbg_get_bp_list_fn)(void);
-
-typedef bool (*dbg_set_hw_bp_fn)(DWORD_PTR addr, const char* type, size_t size);
-typedef bool (*dbg_del_hw_bp_fn)(DWORD_PTR addr);
-typedef void* (*dbg_get_hw_bp_list_fn)(void);
-
-typedef void (*dbg_step_fn)(void);
-typedef void (*dbg_step_over_fn)(void);
-typedef void (*dbg_step_out_fn)(void);
-typedef void (*dbg_run_fn)(void);
-typedef void (*dbg_stop_fn)(void);
-
-typedef CONTEXT* (*dbg_get_context_fn)(void);
-typedef bool (*dbg_change_reg_fn)(const char* reg, DWORD_PTR value);
-
-typedef size_t (*dbg_mem_dump_fn)(DWORD_PTR addr, void* output, size_t size);
-typedef bool (*dbg_mem_edit_fn)(DWORD_PTR addr, void* input, size_t size);
-
-typedef void* (*dbg_get_modules_fn)(void);
-typedef void* (*dbg_get_threads_fn)(void);
-typedef void (*dbg_notify)(const CDebugEvent* de);
-
-struct DebugCAPI {
-    dbg_set_bp_fn setBP;
-    dbg_del_bp_fn delBP;
-    dbg_get_bp_list_fn getBpList;
-
-    dbg_set_hw_bp_fn setHwBP;
-    dbg_del_hw_bp_fn delHwBP;
-    dbg_get_hw_bp_list_fn getHwBpList;
-
-    dbg_step_fn step;
-    dbg_step_over_fn stepOver;
-    dbg_step_out_fn stepOut;
-    dbg_run_fn run;
-    dbg_stop_fn stop;
-
-    dbg_get_context_fn getCont;
-    dbg_change_reg_fn chgReg;
-
-    dbg_mem_dump_fn memDump;
-    dbg_mem_edit_fn memEdit;
-
-    dbg_get_modules_fn getMods;
-    dbg_get_threads_fn getThreads;
-	dbg_notify notify;
-};
-
-typedef bool (*plugin_init_fn)(const DebugCAPI* host_api);
-typedef void (*plugin_shutdown_fn)(void);
-
-typedef struct PluginAPI {
-    plugin_init_fn init;
-    plugin_shutdown_fn shutdown;
-} PluginAPI;
-
-// Экспортируется ПЛАГИНОМ
-__declspec(dllexport) PluginAPI get_plugin_api(void);
-
-// Экспортируется ЯДРОМ (debugger_core.dll)
-const DebugCAPI* get_debug_api(void);
+        DWORD_PTR startTrace = 0;
+        DWORD_PTR endTrace = 0;
+        char* prog;
+    };
 
 
+    typedef struct DebugCAPI DebugCAPI;
 
+    typedef bool (*dbg_set_bp_fn)(DWORD_PTR addr);
+    typedef void (*dbg_del_bp_fn)(DWORD_PTR addr);
+    typedef void* (*dbg_get_bp_list_fn)(void);
+
+    typedef bool (*dbg_set_hw_bp_fn)(DWORD_PTR addr, const char* type, size_t size);
+    typedef bool (*dbg_del_hw_bp_fn)(DWORD_PTR addr);
+    typedef void* (*dbg_get_hw_bp_list_fn)(void);
+
+    typedef void (*dbg_step_fn)(void);
+    typedef void (*dbg_step_over_fn)(void);
+    typedef void (*dbg_step_out_fn)(void);
+    typedef void (*dbg_run_fn)(void);
+    typedef void (*dbg_stop_fn)(void);
+
+    typedef CONTEXT* (*dbg_get_context_fn)(void);
+    typedef bool (*dbg_change_reg_fn)(const char* reg, DWORD_PTR value);
+
+    typedef size_t(*dbg_mem_dump_fn)(DWORD_PTR addr, void* output, size_t size);
+    typedef bool (*dbg_mem_edit_fn)(DWORD_PTR addr, void* input, size_t size);
+
+    typedef void* (*dbg_get_modules_fn)(void);
+    typedef void* (*dbg_get_threads_fn)(void);
+    typedef void (*dbg_notify)(const CDebugEvent* de);
+    typedef void (*dbg_attach)(CDebugObserver* obs);
+    typedef void (*dbg_detach)(CDebugObserver* obs);
+    typedef bool (*dbg_launch)(const char* prog);
+    typedef void (*dbg_loop)();
+    typedef void (*dbg_obs_update)(const CDebugEvent*);
+
+    struct CDebugObserver
+    {
+        void* userData;
+        dbg_obs_update callback;
+
+    };
+
+    struct DebugCAPI {
+        dbg_set_bp_fn setBP;
+        dbg_del_bp_fn delBP;
+        dbg_get_bp_list_fn getBpList;
+
+        dbg_set_hw_bp_fn setHwBP;
+        dbg_del_hw_bp_fn delHwBP;
+        dbg_get_hw_bp_list_fn getHwBpList;
+
+        dbg_step_fn step;
+        dbg_step_over_fn stepOver;
+        dbg_step_out_fn stepOut;
+        dbg_run_fn run;
+        dbg_stop_fn stop;
+
+        dbg_get_context_fn getCont;
+        dbg_change_reg_fn chgReg;
+
+        dbg_mem_dump_fn memDump;
+        dbg_mem_edit_fn memEdit;
+
+        dbg_get_modules_fn getMods;
+        dbg_get_threads_fn getThreads;
+
+
+        dbg_notify notify;
+        dbg_attach attach;
+        dbg_detach detach;
+
+        dbg_launch launch;
+        dbg_loop loop;
+    };
+
+    typedef bool (*plugin_init_fn)(const DebugCAPI* host_api);
+    typedef void (*plugin_shutdown_fn)(void);
+
+    typedef struct PluginAPI {
+        plugin_init_fn init;
+        plugin_shutdown_fn shutdown;
+    } PluginAPI;
+
+    // Экспортируется ПЛАГИНОМ
+    __declspec(dllexport) PluginAPI get_plugin_api(void);
+
+    // Экспортируется ЯДРОМ (debugger_core.dll)
+    const DebugCAPI* get_debug_api(void);
+
+
+    // === Функции для плагинов (чисто C) ===
+    void initCDisasmLine(struct CDisasmLine* line);
+    void initCDataLine(struct CDataLine* line);
+    void initCDataSection(struct CDataSection* section);
+    void initCStackLine(struct CStackLine* line);
+    void initCDebugEvent(struct CDebugEvent* event);
+
+    void freeCDisasmLine(struct CDisasmLine* line);
+    void freeCDataLine(struct CDataLine* line);
+    void freeCDataSection(struct CDataSection* section);
+    void freeCStackLine(struct CStackLine* line);
+    void freeCDebugEvent(struct CDebugEvent* event);
 #ifdef __cplusplus
 }
 #endif
@@ -177,7 +210,7 @@ struct DataLine
     // Конструктор из CDataLine
     DataLine(const CDataLine& c)
         : address(c.address)
-        , bytes(c.bytes ? c.bytes : nullptr, c.bytes + (c.bytes ? c.bytes_size : 0))
+        , bytes(c.bytes ? c.bytes : nullptr, c.bytes + (c.bytes ? c.bytesSize : 0))
         , ascii(c.ascii ? c.ascii : "")
     {
     }
@@ -198,9 +231,9 @@ struct DataSection
         : secName(c.secName ? c.secName : "")
         , data()
     {
-        if (c.data && c.data_count > 0) {
-            data.reserve(c.data_count);
-            for (size_t i = 0; i < c.data_count; ++i) {
+        if (c.data && c.dataCount > 0) {
+            data.reserve(c.dataCount);
+            for (size_t i = 0; i < c.dataCount; ++i) {
                 data.emplace_back(c.data[i]);
             }
         }
@@ -254,25 +287,25 @@ struct DebugEvent
         , prog(c.prog ? c.prog : "")
     {
         // disasmCode
-        if (c.disasmCode && c.disasmCode_count > 0) {
-            disasmCode.reserve(c.disasmCode_count);
-            for (size_t i = 0; i < c.disasmCode_count; ++i) {
+        if (c.disasmCode && c.disasmCodeCount > 0) {
+            disasmCode.reserve(c.disasmCodeCount);
+            for (size_t i = 0; i < c.disasmCodeCount; ++i) {
                 disasmCode.emplace_back(c.disasmCode[i]);
             }
         }
 
         // data
-        if (c.data && c.data_count > 0) {
-            data.reserve(c.data_count);
-            for (size_t i = 0; i < c.data_count; ++i) {
+        if (c.data && c.dataCount > 0) {
+            data.reserve(c.dataCount);
+            for (size_t i = 0; i < c.dataCount; ++i) {
                 data.emplace_back(c.data[i]);
             }
         }
 
         // stackData
-        if (c.stackData && c.stackData_count > 0) {
-            stackData.reserve(c.stackData_count);
-            for (size_t i = 0; i < c.stackData_count; ++i) {
+        if (c.stackData && c.stackDataCount > 0) {
+            stackData.reserve(c.stackDataCount);
+            for (size_t i = 0; i < c.stackDataCount; ++i) {
                 stackData.emplace_back(c.stackData[i]);
             }
         }

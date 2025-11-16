@@ -1,10 +1,11 @@
 #pragma once
-#include "msg.hpp"
 
 
-class Observer
+struct DebugEvent;
+
+class DebugObserver
 {
 public:
-	virtual ~Observer() = default;
+	virtual ~DebugObserver() = default;
 	virtual void update(const DebugEvent& de) = 0;
 };

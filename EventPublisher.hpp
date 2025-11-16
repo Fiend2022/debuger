@@ -8,12 +8,12 @@
 class EventPublisher
 {
 private:
-	std::vector<Observer*> observers;
+	std::vector<DebugObserver*> observers;
 	std::mutex mut;
 
 public:
-	void detach(Observer* obs);
-	void attach(Observer* obs);
+	void detach(DebugObserver* obs);
+	void attach(DebugObserver* obs);
 	void notify(const DebugEvent& de);
 
 };
