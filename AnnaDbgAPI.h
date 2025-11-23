@@ -25,7 +25,7 @@ extern "C" {
     {
         DWORD_PTR address;
         BYTE* bytes;
-        size_t bytesSize;   // ← вы уже добавили
+        size_t bytesSize;   
         char* ascii;
     };
 
@@ -33,7 +33,7 @@ extern "C" {
     {
         char* secName;
         CDataLine* data;
-        size_t dataCount;   // ← вы уже добавили
+        size_t dataCount;   
     };
 
     struct CStackLine
@@ -46,10 +46,45 @@ extern "C" {
     typedef enum
     {
         CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
-        Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
-        InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
+        CAPI__Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
+        CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
     } CDebugEventType;
 
+    struct CExportedSymbol
+    {
+        char* name;
+        DWORD_PTR address;
+    };
+
+    struct CModule
+    {
+        DWORD_PTR baseAddress;
+        size_t sizeOfSymbols;
+        CExportedSymbol* symbols;
+        char* name;
+
+    };
+
+
+    struct CActiveThread
+    {
+        DWORD threadId;
+        HANDLE hThread;
+        bool isRunning;
+    };
+
+    struct CBreakPoint
+    {
+        bool enable;
+        BYTE saveByte;
+        bool temp;
+        DWORD_PTR address;
+    };
+    struct CHwBreakpoint {
+        bool enable;
+        DWORD_PTR address;
+        int size; // 1, 2, 4, 8
+    };
     struct CDebugEvent
     {
         CDebugEventType type;
@@ -68,6 +103,13 @@ extern "C" {
         char* prog;
     };
 
+    struct PlugCmd
+    {
+        char* name;
+        char* help;
+        const char* (*handler)(const char* args);
+        CDebugEventType type;
+    };
 
     typedef struct DebugCAPI DebugCAPI;
 
@@ -93,18 +135,26 @@ extern "C" {
 
     typedef void* (*dbg_get_modules_fn)(void);
     typedef void* (*dbg_get_threads_fn)(void);
-    typedef void (*dbg_notify)(const CDebugEvent* de);
+
+
+    typedef void (*dbg_send_command_fn)(const char* cmd);
     typedef void (*dbg_attach)(CDebugObserver* obs);
     typedef void (*dbg_detach)(CDebugObserver* obs);
     typedef bool (*dbg_launch)(const char* prog);
     typedef void (*dbg_loop)();
     typedef void (*dbg_obs_update)(const CDebugEvent*);
 
+    typedef void (*dbg_free_bp_list)(CBreakPoint*);
+    typedef void (*dbg_free_hw_bp_list)(CHwBreakpoint*);
+    typedef void (*dbg_free_modules)(CModule*, size_t);
+    typedef void (*dbg_free_threads)(CActiveThread*);
+    typedef void (*dbg_add_new_cmd)(PlugCmd*);
+
     struct CDebugObserver
     {
         void* userData;
         dbg_obs_update callback;
-
+        char* plugName;
     };
 
     struct DebugCAPI {
@@ -132,12 +182,19 @@ extern "C" {
         dbg_get_threads_fn getThreads;
 
 
-        dbg_notify notify;
+        dbg_send_command_fn sendCommand;
         dbg_attach attach;
         dbg_detach detach;
 
         dbg_launch launch;
         dbg_loop loop;
+
+        dbg_free_bp_list freeBpList;
+        dbg_free_hw_bp_list freeHwBpList;
+        dbg_free_modules freeMods;
+        dbg_free_threads freeThreads;
+
+        dbg_add_new_cmd addNewCmd;
     };
 
     typedef bool (*plugin_init_fn)(const DebugCAPI* host_api);

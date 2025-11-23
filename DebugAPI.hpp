@@ -5,8 +5,9 @@
 class Debugger;
 class DebugObserver;
 
-void InitDebugAPI(Debugger* dbg);
-
+extern "C" __declspec(dllexport) void initDebugAPI(Debugger* dbg);
+extern "C" __declspec(dllexport) void* createDebugger();
+extern "C" __declspec(dllexport) void destroyDebugger(void* dbg);
 
 struct CDebugObserver
 {
@@ -17,15 +18,60 @@ struct CDebugObserver
 
 void notifyAllCObservers(const DebugEvent& ev);
 
+struct CExportedSymbol
+{
+    char* name;
+    DWORD_PTR address;
+};
+
+struct CModule
+{
+    DWORD_PTR baseAddress;
+    size_t sizeOfSymbols;
+    CExportedSymbol* symbols;
+    char* name;
+
+};
+
+struct CActiveThread
+{
+    DWORD threadId;
+    HANDLE hThread;
+    bool isRunning;
+};
+
+struct CBreakPoint
+{
+    bool enable;
+    BYTE saveByte;
+    bool temp;
+    DWORD_PTR address;
+};
+struct CHwBreakpoint {
+    bool enable;
+    DWORD_PTR address;
+    int size; // 1, 2, 4, 8
+};
+
+
+struct PlugCmd
+{
+    char* name;
+    char* help;
+    const char* (*handler)(const char* args);
+    CDebugEventType type;
+};
+
 struct DebugCAPI
 {
     bool (*setBP)(DWORD_PTR addr);
     void (*delBP)(DWORD_PTR addr);
-    void* (*getBpList)();
+    CBreakPoint* (*getBpList)(size_t* count);
+
 
     bool (*setHwBP)(DWORD_PTR addr, const char* type, size_t size);
     bool (*delHwBP)(DWORD_PTR addr);
-    void* (*getHwBpList)();
+    CHwBreakpoint* (*getHwBpList)(size_t* count);
 
     void (*step)();
     void (*stepOver)();
@@ -40,15 +86,22 @@ struct DebugCAPI
     size_t(*memDump)(DWORD_PTR addr, void* output, size_t size);
     bool (*memEdit)(DWORD_PTR addr, void* input, size_t size);
 
-    void* (*getMods)();
-    void* (*getThreads)();
+    CModule* (*getMods)(size_t* count);
+    CActiveThread* (*getThreads)(size_t* count);
 
-    void (*sendMessage)(const CDebugEvent* de);
+    void (*sendCommand)(const char* cmd);
     void (*attachObserver)(CDebugObserver* obs);
     void (*detachObserver)(CDebugObserver* obs);
 
     bool (*launchProg)(const char* prog);
     void (*dbgLoop)();
+
+    void (*freeBreakList)(CBreakPoint*);
+    void (*freeHwBreakList)(CHwBreakpoint*);
+    void (*freeMods)(CModule*, size_t);
+    void (*freeThreads)(CActiveThread*);
+
+    void (*addNewCommand)(PlugCmd* cmd);
 };
 
 

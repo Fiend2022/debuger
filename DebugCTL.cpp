@@ -128,7 +128,7 @@ void Debugger::printMemory(DWORD_PTR addr, std::ostream& stream, size_t size = 1
 
 void Debugger::debugRun()
 {
-
+    printf("[DEBUG_RUN] debugRun started\n");
     while (active)
     {
         DEBUG_EVENT debugEvent;
@@ -138,10 +138,15 @@ void Debugger::debugRun()
             break;
         static std::vector<DisasmLine> sourceCode;
         static std::vector<DataSection> sections;
+        //printf("[DEBUG_RUN] Debug event: %d, PID: %d, TID: %d\n",
+        //    debugEvent.dwDebugEventCode,
+        //    debugEvent.dwProcessId,
+        //    debugEvent.dwThreadId);
 
 
         switch (debugEvent.dwDebugEventCode)
         {
+
         case CREATE_THREAD_DEBUG_EVENT:
             handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
             break;
@@ -180,7 +185,7 @@ void Debugger::debugRun()
             std::tie(sourceCode, sections) = getAllSections();
 
             setBreakPoint(entryAddr);
-
+            printf("Entry addr: %p", entryAddr);
             auto it = std::find_if(sourceCode.begin(), sourceCode.end(),
                 [entryAddr](const DisasmLine& line)
                 { return line.address == entryAddr; }

@@ -41,12 +41,12 @@ private:
     bool delHardwareBreakpoint(DWORD_PTR addr);
     int getHardwareBreakpointIndexFromDr6(DWORD dr6);
 
-
+public:
     enum class BreakState
     {
         disable, enable
     };
-
+private:
     struct BreakPoint
     {
         BreakState state;
@@ -160,6 +160,16 @@ private:
         DebugEvent::Type type;
     };
     std::vector<CommandInfo> commands;
+
+    //struct PlugCmd
+    //{
+    //    std::string name;
+    //    std::string usage;
+    //    std::function<std::string(std::istringstream&)> handler;
+    //    DebugEvent::Type type;
+    //};
+    //std::vector<PlugCmd> plugCommands;
+
     std::string waitForCommand();
 
 

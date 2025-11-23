@@ -30,7 +30,7 @@ OBJECTS = $(SOURCES:.cpp=.obj)
 DLL_NAME = DebugCore$(ARCH).dll
 LIB_NAME = DebugCore$(ARCH).lib
 
-CXXFLAGS = /std:c++20 /EHsc /MD /I. /I"$(VCPKG_INCLUDE)" /DNDEBUG
+CXXFLAGS = /std:c++20 /EHsc /MT /I. /I"$(VCPKG_INCLUDE)" /DNDEBUG
 LDFLAGS = /DLL /MACHINE:$(MACHINE) /OUT:$(DLL_NAME)
 
 LIBS = kernel32.lib user32.lib "$(VCPKG_LIB)\libudis86.lib"

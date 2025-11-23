@@ -44,8 +44,8 @@ public:
     static std::string dbg_getRegs();
 
     // Modules and Threads functions
-    static std::unordered_map<std::string, Debugger::Module>* dbg_getModules();
-    static std::unordered_map<DWORD, Debugger::ActiveThread>* dbg_getThreads();
+    static std::unordered_map<std::string, Debugger::Module>& dbg_getModules();
+    static std::unordered_map<DWORD, Debugger::ActiveThread>& dbg_getThreads();
 
     // Memmory functions
     static std::vector<BYTE> dbg_dump(DWORD_PTR addr, size_t size);
@@ -57,6 +57,9 @@ public:
     // Launch functions
     static bool dbg_launch(const std::string& prog);
     static void dbg_loop();
+
+
+    static void dbg_addNewCmd(PlugCmd* cmd);
 };
 
 
@@ -151,21 +154,16 @@ bool DebugAPI::dbg_memoryEdit(DWORD_PTR addr, void* newValue, size_t size)
     }
 }
 
-std::unordered_map<std::string, Debugger::Module>* DebugAPI::dbg_getModules()
+std::unordered_map<std::string, Debugger::Module>& DebugAPI::dbg_getModules()
 {
     if (debug)
-        return &debug->modules;
-    else
-        return nullptr;
-
+        return debug->modules;
 }
 
-std::unordered_map<DWORD, Debugger::ActiveThread>* DebugAPI::dbg_getThreads()
+std::unordered_map<DWORD, Debugger::ActiveThread>& DebugAPI::dbg_getThreads()
 {
     if (debug)
-        return &debug->threads;
-    else
-        return nullptr;
+        return debug->threads;
 }
 
 std::unordered_map<DWORD_PTR, Debugger::BreakPoint>& DebugAPI::dbg_getBpList() {
@@ -242,6 +240,25 @@ void DebugAPI::dbg_loop()
     debug->debugLoop();
 }
 
+void DebugAPI::dbg_addNewCmd(PlugCmd* cmd) {
+    if (debug) {
+        debug->commands.push_back(Debugger::CommandInfo{
+            std::string(cmd->name),
+            std::string(cmd->help),
+            [cmd](Debugger& dbg, std::istringstream& stream) -> std::string {
+                std::string args_str;
+                std::string token;
+                while (stream >> token) {
+                    args_str += token + " ";
+                }
+                const char* result = cmd->handler(args_str.c_str());
+                return result ? std::string(result) : "";
+            },
+            static_cast<DebugEvent::Type>(cmd->type)
+            });
+    }
+}
+
 bool API__setBP(DWORD_PTR addr)
 {
     return DebugAPI::dbg_setBreakPoint(addr);
@@ -252,9 +269,23 @@ void API__delBP(DWORD_PTR addr)
     return DebugAPI::dbg_deleteBreakPoint(addr);
 }
 
-void* API__BpList()
+CBreakPoint* API__BpList(size_t* size)
 {
-    return &DebugAPI::dbg_getBpList();
+    auto& bpList = DebugAPI::dbg_getBpList();
+    CBreakPoint* bpArray = new CBreakPoint [bpList.size()];
+
+    size_t i = 0;
+    for (const auto& [_, bp] : bpList)
+    {
+        CBreakPoint cBP;
+        cBP.address = bp.address;
+        cBP.saveByte = bp.saveByte;
+        cBP.temp = bp.temp;
+        cBP.enable = bp.state == Debugger::BreakState::disable ? false : true;
+        bpArray[i++] = cBP;
+    }
+    *size = bpList.size();
+    return bpArray;
 }
 
 bool API__setHwBP(DWORD_PTR addr, const char* type, size_t size)
@@ -267,9 +298,29 @@ bool API__delHwBP(DWORD_PTR addr)
     return DebugAPI::dbg_deleteHwBreakPoint(addr);
 }
 
-void* API__HwBpList()
+CHwBreakpoint* API__HwBpList(size_t* countRes)
 {
-    return (void*)DebugAPI::dbg_getHwBpList();
+    if (!countRes) return nullptr;
+
+    auto hwList = DebugAPI::dbg_getHwBpList();  // std::array<HWBreakPoint, 4>
+
+    size_t count = 4;
+    CHwBreakpoint* hwArray = new CHwBreakpoint[count];
+    if (!hwArray) {
+        *countRes = 0;
+        return nullptr;
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        CHwBreakpoint cBP;
+        cBP.address = hwList[i].address;
+        cBP.enable = hwList[i].active;
+        cBP.size = hwList[i].size;
+        hwArray[i] = cBP;
+    }
+
+    *countRes = count;
+    return hwArray;
 }
 
 void API__step()
@@ -320,20 +371,51 @@ bool API__memEdit(DWORD_PTR addr, void* input, size_t size)
     return DebugAPI::dbg_memoryEdit(addr, input, size);
 }
 
-void* API__getModules()
+CModule* API__getModules(size_t* count)
 {
-    return (void*)DebugAPI::dbg_getModules();
+    auto& modList = DebugAPI::dbg_getModules();
+    CModule* modArray = new CModule[modList.size()];
+    size_t i = 0;
+    for (auto& [name, mod] : modList)
+    {
+        CModule module;
+        module.baseAddress = mod.baseAddress;
+        module.sizeOfSymbols = mod.symbols.size();
+        module.symbols = new CExportedSymbol[module.sizeOfSymbols];
+        size_t j = 0;
+        for (auto sym : mod.symbols)
+        {
+            module.symbols[j].address = sym.address;
+            module.symbols[j].name = new char[sym.name.size()];
+            memcpy(module.symbols[j].name, sym.name.c_str(), sym.name.size());
+            j++;
+        }
+        module.name = new char[name.size() + 1];
+        modArray[i++] = module;
+    }
+    *count = modList.size();
+    return modArray;
+
 }
 
-void* API__getThreads()
+CActiveThread* API__getThreads(size_t* count)
 {
-    return (void*)DebugAPI::dbg_getThreads();
+    auto& threadList = DebugAPI::dbg_getThreads();
+    CActiveThread* threadArray = new CActiveThread[threadList.size()];
+    size_t i = 0;
+    for (auto& [_, t] : threadList)
+    {
+        CActiveThread thread;
+        thread.hThread = t.hThread;
+        thread.isRunning = t.isRunning;
+        thread.threadId = t.threadId;
+        threadArray[i++] = thread;
+    }
+    *count = threadList.size();
+    return threadArray;
 }
 
-void API__notify(const CDebugEvent* de)
-{
-    DebugAPI::dbg_notify(*de);
-}
+
 
 bool DebugAPI::dbg_launch(const std::string& prog)
 {
@@ -366,6 +448,44 @@ void API__loop()
     DebugAPI::dbg_loop();
 }
 
+
+void API__freeBreakList(CBreakPoint* cBreakList)
+{
+    delete[] cBreakList;
+}
+void API__freeHwBreakList(CHwBreakpoint* cHwBreakList)
+{
+    delete[] cHwBreakList;
+}
+
+void API__freeModules(CModule* modules, size_t count) {
+    if (!modules) return;
+    for (size_t i = 0; i < count; ++i) {
+        delete[] modules[i].name;
+        if (modules[i].symbols) {
+            for (size_t j = 0; j < modules[i].sizeOfSymbols; ++j) {
+                delete[] modules[i].symbols[j].name;
+            }
+            delete[] modules[i].symbols;
+        }
+    }
+    delete[] modules;
+}
+
+void API__freeThreads(CActiveThread* threads)
+{
+    delete[] threads;
+}
+void API__addNewCmd(PlugCmd* cmd)
+{
+    DebugAPI::dbg_addNewCmd(cmd);
+}
+
+void API__sendCommand(const char* cmd)
+{
+    if (!cmd || !debug) return;
+    debug->sendCommand(std::string(cmd));
+}
 static DebugCAPI gCAPI =
 {
     API__setBP, API__delBP, API__BpList,
@@ -374,8 +494,11 @@ static DebugCAPI gCAPI =
     API__getContext, API__chgReg,
     API__memDump, API__memEdit,
     API__getModules, API__getThreads,
-    API__notify, API__attach, API__detach,
-    API__launch, API__loop
+    API__sendCommand, API__attach, API__detach,
+    API__launch, API__loop,
+    API__freeBreakList, API__freeHwBreakList,
+    API__freeModules, API__freeThreads,
+    API__addNewCmd
 };
 
 extern "C" const DebugCAPI* get_debug_api()
@@ -383,10 +506,19 @@ extern "C" const DebugCAPI* get_debug_api()
     return &gCAPI;
 }
 
-void InitDebugAPI(Debugger* dbg)
+extern "C" __declspec(dllexport) void initDebugAPI(Debugger* dbg)
 {
     if (!debug)
         DebugAPI::bind(dbg);
+}
+extern "C" __declspec(dllexport) void* createDebugger()
+{
+    return new Debugger();
+}
+
+extern "C" __declspec(dllexport) void destroyDebugger(void* dbg)
+{
+    delete static_cast<Debugger*>(dbg);
 }
 
 

@@ -12,7 +12,7 @@ int main(int argc, char** argv, char** envp)
     GUI gui;
     Logger logger;
     Debugger debugger;
-    InitDebugAPI(&debugger);
+    initDebugAPI(&debugger);
 
 
     debugger.attach(&gui);

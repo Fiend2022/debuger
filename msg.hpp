@@ -3,7 +3,7 @@
 #include <vector>
 #include <Windows.h>
 
-// === Объявления структур (без конструкторов/деструкторов) ===
+// === Объявления структур ===
 struct CDisasmLine
 {
     DWORD_PTR address;
@@ -37,8 +37,8 @@ struct CStackLine
 typedef enum
 {
     CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
-    Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
-    InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
+    CAPI__Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
+    CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
 } CDebugEventType;
 
 struct CDebugEvent
@@ -57,6 +57,9 @@ struct CDebugEvent
     DWORD_PTR endTrace;
     char* prog;
 };
+
+
+
 
 // === Функции инициализации ===
 void initCDisasmLine(struct CDisasmLine* line);
