@@ -12,6 +12,7 @@ class DebugObserver;
 extern "C" {
 #endif
 
+    struct CDebugObserver;
     // =============== C-структуры (оставляем как есть) ===============
     struct CDisasmLine
     {
@@ -47,7 +48,7 @@ extern "C" {
     {
         CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
         CAPI__Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
-        CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
+        CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__LoadPlug
     } CDebugEventType;
 
     struct CExportedSymbol
@@ -96,7 +97,7 @@ extern "C" {
         size_t dataCount;        // ← вы уже добавили
         CStackLine* stackData;
         size_t stackDataCount;   // ← вы уже добавили
-        CONTEXT context;
+        CONTEXT* context;
 
         DWORD_PTR startTrace = 0;
         DWORD_PTR endTrace = 0;
@@ -107,11 +108,23 @@ extern "C" {
     {
         char* name;
         char* help;
-        const char* (*handler)(const char* args);
+        const char* (__cdecl *handler)(const char* args);
         CDebugEventType type;
     };
 
+    struct CObserverResult
+    {
+        bool handled;
+    };
+
     typedef struct DebugCAPI DebugCAPI;
+
+    enum CObserverPriority {
+        PLUGIN = 100,
+        CORE_HOOK = 200,
+        LOGGER = 10,
+        GUI = 0
+    };
 
     typedef bool (*dbg_set_bp_fn)(DWORD_PTR addr);
     typedef void (*dbg_del_bp_fn)(DWORD_PTR addr);
@@ -142,22 +155,28 @@ extern "C" {
     typedef void (*dbg_detach)(CDebugObserver* obs);
     typedef bool (*dbg_launch)(const char* prog);
     typedef void (*dbg_loop)();
-    typedef void (*dbg_obs_update)(const CDebugEvent*);
+    typedef CObserverResult* (*dbg_obs_update)(const CDebugEvent*);
 
     typedef void (*dbg_free_bp_list)(CBreakPoint*);
     typedef void (*dbg_free_hw_bp_list)(CHwBreakpoint*);
     typedef void (*dbg_free_modules)(CModule*, size_t);
     typedef void (*dbg_free_threads)(CActiveThread*);
     typedef void (*dbg_add_new_cmd)(PlugCmd*);
+    typedef void (*dbg_step_debug_loop_fn)();
+    typedef char* (*dbg_disasm_fn)(DWORD_PTR, size_t);
+
 
     struct CDebugObserver
     {
         void* userData;
         dbg_obs_update callback;
         char* plugName;
+        size_t priority;
+
     };
 
-    struct DebugCAPI {
+    struct DebugCAPI
+    {
         dbg_set_bp_fn setBP;
         dbg_del_bp_fn delBP;
         dbg_get_bp_list_fn getBpList;
@@ -188,6 +207,8 @@ extern "C" {
 
         dbg_launch launch;
         dbg_loop loop;
+        dbg_step_debug_loop_fn stepDebugLoop;
+
 
         dbg_free_bp_list freeBpList;
         dbg_free_hw_bp_list freeHwBpList;
@@ -195,12 +216,15 @@ extern "C" {
         dbg_free_threads freeThreads;
 
         dbg_add_new_cmd addNewCmd;
+        dbg_disasm_fn disasm;
+
     };
 
     typedef bool (*plugin_init_fn)(const DebugCAPI* host_api);
     typedef void (*plugin_shutdown_fn)(void);
 
-    typedef struct PluginAPI {
+    typedef struct PluginAPI
+    {
         plugin_init_fn init;
         plugin_shutdown_fn shutdown;
     } PluginAPI;
@@ -324,7 +348,7 @@ struct DebugEvent
     std::vector<DisasmLine> disasmCode;
     std::vector<DataSection> data;
     std::vector<StackLine> stackData;
-    CONTEXT context;
+    CONTEXT* context;
 
     DWORD_PTR startTrace = 0;
     DWORD_PTR endTrace = 0;

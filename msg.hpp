@@ -38,7 +38,7 @@ typedef enum
 {
     CAPI__StartDebbug, CAPI__BreakpointEvent, CAPI__BreakpointSetup, CAPI__HardBreakpointSetup, CAPI__ModuleLoad, CAPI__ProcessExit, CAPI__CreateThread, CAPI__ExitThread, CAPI__ModuleUnload, CAPI__DbgStr,
     CAPI__Dump, CAPI__Reg, CAPI__ModList, CAPI__ThreadList, CAPI__BreakList, CAPI__HwBreakList, CAPI__CreateProc, CAPI__DisasmCode, CAPI__HardwareBreak,
-    CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__SetupTrace, CAPI__TraceStep, CAPI__LoadPlug
+    CAPI__InputError, CAPI__Step, CAPI__Run, CAPI__DbgError, CAPI__DbgWarning, CAPI__StepOver, CAPI__StepOut, CAPI__Nope, CAPI__LoadPlug
 } CDebugEventType;
 
 struct CDebugEvent
@@ -52,7 +52,7 @@ struct CDebugEvent
     size_t dataCount;
     CStackLine* stackData;
     size_t stackDataCount;
-    CONTEXT context;
+    CONTEXT* context;
     DWORD_PTR startTrace;
     DWORD_PTR endTrace;
     char* prog;
@@ -165,7 +165,7 @@ struct DebugEvent
     enum Type {
         StartDebbug, BreakpointEvent, BreakpointSetup, HardBreakpointSetup, ModuleLoad, ProcessExit, CreateThread, ExitThread, ModuleUnload, DbgStr,
         Dump, Reg, ModList, ThreadList, BreakList, HwBreakList, CreateProc, DisasmCode, HardwareBreak,
-        InputError, Step, Run, DbgError, DbgWarning, StepOver, StepOut, Nope, SetupTrace, TraceStep, LoadPlug
+        InputError, Step, Run, DbgError, DbgWarning, StepOver, StepOut, Nope, LoadPlug
     } type;
 
     DWORD_PTR address = 0;
@@ -173,10 +173,8 @@ struct DebugEvent
     std::vector<DisasmLine> disasmCode;
     std::vector<DataSection> data;
     std::vector<StackLine> stackData;
-    CONTEXT context;
+    CONTEXT* context;
 
-    DWORD_PTR startTrace = 0;
-    DWORD_PTR endTrace = 0;
     std::string prog;
     DebugEvent() = default;
     // Конструктор из CDebugEvent
@@ -188,8 +186,6 @@ struct DebugEvent
         , data()
         , stackData()
         , context(c.context)
-        , startTrace(c.startTrace)
-        , endTrace(c.endTrace)
         , prog(c.prog ? c.prog : "")
     {
         // disasmCode

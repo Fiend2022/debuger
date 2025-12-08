@@ -5,18 +5,34 @@
 class Debugger;
 class DebugObserver;
 
+
+
 extern "C" __declspec(dllexport) void initDebugAPI(Debugger* dbg);
 extern "C" __declspec(dllexport) void* createDebugger();
 extern "C" __declspec(dllexport) void destroyDebugger(void* dbg);
 
+
+struct CObserverResult
+{
+    bool handled;
+};
+
+enum CObserverPriority {
+    PLUGIN = 100,
+    CORE_HOOK = 200,
+    LOGGER = 10,
+    USR = 0
+};
+
 struct CDebugObserver
 {
     void* userData;
-    void (*update)(const CDebugEvent* de);
+    CObserverResult* (*update)(const CDebugEvent* de);
     char* plugName;
+    size_t priority;
 };
 
-void notifyAllCObservers(const DebugEvent& ev);
+bool notifyAllCObservers(const DebugEvent& ev);
 
 struct CExportedSymbol
 {
@@ -58,7 +74,7 @@ struct PlugCmd
 {
     char* name;
     char* help;
-    const char* (*handler)(const char* args);
+    const char* (__cdecl *handler)(const char* args);
     CDebugEventType type;
 };
 
@@ -95,6 +111,7 @@ struct DebugCAPI
 
     bool (*launchProg)(const char* prog);
     void (*dbgLoop)();
+    void (*stepDebugLoop)();
 
     void (*freeBreakList)(CBreakPoint*);
     void (*freeHwBreakList)(CHwBreakpoint*);
@@ -102,6 +119,7 @@ struct DebugCAPI
     void (*freeThreads)(CActiveThread*);
 
     void (*addNewCommand)(PlugCmd* cmd);
+    char* (*disasm)(DWORD_PTR, size_t);
 };
 
 

@@ -1,5 +1,6 @@
 #include "EventPublisher.hpp"
 #include "DebugAPI.hpp"
+#include <algorithm>
 
 void EventPublisher::detach(DebugObserver* obs)
 {
@@ -14,13 +15,22 @@ void EventPublisher::attach(DebugObserver* obs)
 {
     std::lock_guard<std::mutex> lock(mut);
     observers.push_back(obs);
+    obsSorted = false;
 }
 
 void EventPublisher::notify(const DebugEvent& de)
 {
     std::lock_guard<std::mutex> lock(mut);
-    for (auto obs : observers)
-        obs->update(de);
+    if (!notifyAllCObservers(de))
+    {
+        std::stable_sort(observers.begin(), observers.end(),
+            [](DebugObserver* a, DebugObserver* b) {
+                return a->getPriority() > b->getPriority(); // выше приоритет Ч раньше
+            });
+        for (auto obs : observers)
+            if (obs->update(de).handled)
+                break;
+    }
 
-    notifyAllCObservers(de);
+    
 }

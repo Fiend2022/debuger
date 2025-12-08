@@ -10,6 +10,7 @@ class EventPublisher
 private:
 	std::vector<DebugObserver*> observers;
 	std::mutex mut;
+	bool obsSorted = false;
 
 public:
 	void detach(DebugObserver* obs);

@@ -54,7 +54,9 @@ bool Debugger::addHardwareBreakpoint(DWORD_PTR addr, const std::string& typeStr,
     }
 
     int rw = 0, len = 0;
-    if (typeStr == "write")
+    if (typeStr == "exec")
+        rw = 0;
+    else if (typeStr == "write")
         rw = 1;
     else if (typeStr == "access")
         rw = 3;
@@ -503,7 +505,7 @@ void Debugger::stepOver()
     if (ReadProcessMemory(hProcess, (LPCVOID)retAddr, buf.data(), 16, &bytesRead) || bytesRead == 0)
     {
         size_t len = disas.DisasInst(buf.data(), bytesRead, retAddr, asmBuf, hexBuf);
-        if (asmBuf.find("call") != std::string::npos)
+        if (asmBuf.find("call") != std::string::npos || asmBuf[0] == 'j')
         {
             setBreakPoint(curIP + len, true);
             state = RUN;

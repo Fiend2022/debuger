@@ -77,7 +77,8 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>G:\imgui-master\backends;G:\imgui-master;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\Илья\source\repos\imgui-master\backends;C:\Users\Илья\source\repos\imgui-master;G:\imgui-master\backends;G:\imgui-master;</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -93,8 +94,9 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>G:\imgui-master\backends;G:\imgui-master;</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>C:\Users\Илья\source\repos\imgui-master\backends;C:\Users\Илья\source\repos\imgui-master;C:\Users\Илья\source\repos\imgui-master\backends;;C:\Users\Илья\source\repos\imgui-master</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -111,7 +113,8 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>G:\imgui-master\backends;G:\imgui-master;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\Илья\source\repos\imgui-master\backends;C:\Users\Илья\source\repos\imgui-master;G:\imgui-master\backends;G:\imgui-master;</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -127,8 +130,9 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>G:\imgui-master\backends;G:\imgui-master;G:\imgui-master\backends;G:\imgui-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>C:\Users\Илья\source\repos\imgui-master\backends;C:\Users\Илья\source\repos\imgui-master;C:\Users\Илья\source\repos\imgui-master\backends;G:\imgui-master\backends;G:\imgui-master;%(AdditionalIncludeDirectories);C:\Users\Илья\source\repos\imgui-master</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

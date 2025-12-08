@@ -25,7 +25,7 @@ private:
 	bool showDebugger;
 	bool succesInit;
 	bool updateIP;
-	CONTEXT context;
+	CONTEXT* context;
 	DWORD_PTR currentIP = 0;
 	size_t currentDataTabIndex = 0;
 	char inputBuf[256] = "";
@@ -70,7 +70,7 @@ public:
 	GUI();
 	~GUI();
 
-	void update(const DebugEvent& de) override;
+	ObserverResult& update(const DebugEvent& de) override;
 	bool ready() { return succesInit; };
 	void run();
 	void pushEvent(const DebugEvent& event);

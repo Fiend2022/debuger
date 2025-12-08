@@ -59,7 +59,6 @@ void initCDebugEvent(CDebugEvent* event) {
     event->dataCount = 0;
     event->stackData = nullptr;
     event->stackDataCount = 0;
-    ZeroMemory(&event->context, sizeof(CONTEXT));
     event->startTrace = 0;
     event->endTrace = 0;
     event->prog = nullptr;
@@ -180,13 +179,13 @@ void copyCDebugEvent(CDebugEvent* dst, const CDebugEvent* src) {
     if (src->disasmCode && src->disasmCodeCount > 0)
     {
         dst->disasmCode = new CDisasmLine[src->disasmCodeCount];
-        for (size_t i = 0; i < src->disasmCodeCount; ++i) 
+        for (size_t i = 0; i < src->disasmCodeCount; ++i)
             copyCDisasmLine(&dst->disasmCode[i], &src->disasmCode[i]);
-        
+
     }
     else
         dst->disasmCode = nullptr;
-    
+
 
     // data
     dst->dataCount = src->dataCount;
@@ -195,22 +194,22 @@ void copyCDebugEvent(CDebugEvent* dst, const CDebugEvent* src) {
         dst->data = new CDataSection[src->dataCount];
         for (size_t i = 0; i < src->dataCount; ++i)
             copyCDataSection(&dst->data[i], &src->data[i]);
-        
+
     }
     else
         dst->data = nullptr;
-    
+
 
     // stackData
     dst->stackDataCount = src->stackDataCount;
     if (src->stackData && src->stackDataCount > 0)
     {
         dst->stackData = new CStackLine[src->stackDataCount];
-        for (size_t i = 0; i < src->stackDataCount; ++i) 
+        for (size_t i = 0; i < src->stackDataCount; ++i)
             copyCStackLine(&dst->stackData[i], &src->stackData[i]);
-        
+
     }
     else
         dst->stackData = nullptr;
-    
+
 }

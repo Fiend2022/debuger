@@ -57,9 +57,12 @@ public:
     // Launch functions
     static bool dbg_launch(const std::string& prog);
     static void dbg_loop();
+    static void dbg_stepDebugLoop();
 
 
     static void dbg_addNewCmd(PlugCmd* cmd);
+
+    static std::string dbg_disasm(DWORD_PTR addr, size_t instCode);
 };
 
 
@@ -68,19 +71,30 @@ public:
 
 static std::vector<CDebugObserver*> observers;
 static std::mutex obsMutex;
+static bool obsSorted = false;
 
 
-void notifyAllCObservers(const DebugEvent& ev)
+bool notifyAllCObservers(const DebugEvent& ev)
 {
     CDebugEvent cEvent = {};
     initCDebugEvent(&cEvent);
 
     copyCppToCDebugEvent(&cEvent, ev);
     std::lock_guard<std::mutex> lock(obsMutex);
-
+    if (!obsSorted)
+    {
+        std::stable_sort(observers.begin(), observers.end(),
+            [](CDebugObserver* a, CDebugObserver* b)
+            {
+                return a->priority > b->priority; 
+            });
+        obsSorted = true;
+    }
     for (auto& sub : observers)
-        sub->update(&cEvent);
+        if (sub->update(&cEvent)->handled)
+            return true;
 
+    return false;
     freeCDebugEvent(&cEvent);
 
 }
@@ -112,16 +126,13 @@ CONTEXT* DebugAPI::dbg_getContext()
     if (debug)
         return debug->cont;
 }
+void DebugAPI::dbg_stepDebugLoop()
+{
+    if (debug)
+        debug->stepDebugLoop(0);
+}
 
-//std::string DebugAPI::dbg_getRegs()
-//{
-//    std::stringstream ss;
-//    if (debug)
-//    {
-//        debug->printRegisters(*debug->cont, ss);
-//        return ss.str();
-//    }
-//}
+
 
 std::vector<BYTE> DebugAPI::dbg_dump(DWORD_PTR addr, size_t size)
 {
@@ -240,17 +251,19 @@ void DebugAPI::dbg_loop()
     debug->debugLoop();
 }
 
-void DebugAPI::dbg_addNewCmd(PlugCmd* cmd) {
-    if (debug) {
-        debug->commands.push_back(Debugger::CommandInfo{
+void DebugAPI::dbg_addNewCmd(PlugCmd* cmd)
+{
+    if (debug)
+    {
+        debug->commands.push_back(Debugger::CommandInfo
+        {
             std::string(cmd->name),
             std::string(cmd->help),
             [cmd](Debugger& dbg, std::istringstream& stream) -> std::string {
                 std::string args_str;
                 std::string token;
-                while (stream >> token) {
+                while (stream >> token)
                     args_str += token + " ";
-                }
                 const char* result = cmd->handler(args_str.c_str());
                 return result ? std::string(result) : "";
             },
@@ -486,6 +499,30 @@ void API__sendCommand(const char* cmd)
     if (!cmd || !debug) return;
     debug->sendCommand(std::string(cmd));
 }
+void API__stepDebugLoop()
+{
+    DebugAPI::dbg_stepDebugLoop();
+
+}
+
+std::string DebugAPI::dbg_disasm(DWORD_PTR addr, size_t instCount)
+{
+    if (debug)
+    {
+        std::stringstream stream;
+        debug->disasmDebugProc(addr, stream, 1);
+        return stream.str();
+    }
+}
+
+char* API__disasm(DWORD_PTR addr, size_t instCount)
+{
+    std::string str = DebugAPI::dbg_disasm(addr, instCount);
+    char* res = new char[str.size() + 1];
+    memcpy(res, str.c_str(), str.size() + 1);
+    return res;
+}
+
 static DebugCAPI gCAPI =
 {
     API__setBP, API__delBP, API__BpList,
@@ -495,10 +532,11 @@ static DebugCAPI gCAPI =
     API__memDump, API__memEdit,
     API__getModules, API__getThreads,
     API__sendCommand, API__attach, API__detach,
-    API__launch, API__loop,
+    API__launch, API__loop, API__stepDebugLoop,
     API__freeBreakList, API__freeHwBreakList,
     API__freeModules, API__freeThreads,
-    API__addNewCmd
+    API__addNewCmd,
+    API__disasm
 };
 
 extern "C" const DebugCAPI* get_debug_api()
@@ -575,12 +613,41 @@ void copyCppToCStackLine(CStackLine* dst, const StackLine& src) {
 }
 
 void copyCppToCDebugEvent(CDebugEvent* dst, const DebugEvent& src) {
-    dst->type = static_cast<CDebugEventType>(src.type);
+       switch (src.type)
+       {
+        case DebugEvent::StartDebbug: dst->type = CAPI__StartDebbug; break;
+        case DebugEvent::BreakpointEvent: dst->type = CAPI__BreakpointEvent; break;
+        case DebugEvent::BreakpointSetup: dst->type = CAPI__BreakpointSetup; break;
+        case DebugEvent::HardBreakpointSetup: dst->type = CAPI__HardBreakpointSetup; break;
+        case DebugEvent::ModuleLoad: dst->type = CAPI__ModuleLoad; break;
+        case DebugEvent::ProcessExit: dst->type = CAPI__ProcessExit; break;
+        case DebugEvent::CreateThread: dst->type = CAPI__CreateThread; break;
+        case DebugEvent::ExitThread: dst->type = CAPI__ExitThread; break;
+        case DebugEvent::ModuleUnload: dst->type = CAPI__ModuleUnload; break;
+        case DebugEvent::DbgStr: dst->type = CAPI__DbgStr; break;
+        case DebugEvent::Dump: dst->type = CAPI__Dump; break;
+        case DebugEvent::Reg: dst->type = CAPI__Reg; break;
+        case DebugEvent::ModList: dst->type = CAPI__ModList; break;
+        case DebugEvent::ThreadList: dst->type = CAPI__ThreadList; break;
+        case DebugEvent::BreakList: dst->type = CAPI__BreakList; break;
+        case DebugEvent::HwBreakList: dst->type = CAPI__HwBreakList; break;
+        case DebugEvent::CreateProc: dst->type = CAPI__CreateProc; break;
+        case DebugEvent::DisasmCode: dst->type = CAPI__DisasmCode; break;
+        case DebugEvent::HardwareBreak: dst->type = CAPI__HardwareBreak; break;
+        case DebugEvent::InputError: dst->type = CAPI__InputError; break;
+        case DebugEvent::Step: dst->type = CAPI__Step; break;
+        case DebugEvent::Run: dst->type = CAPI__Run; break;
+        case DebugEvent::DbgError: dst->type = CAPI__DbgError; break;
+        case DebugEvent::DbgWarning: dst->type = CAPI__DbgWarning; break;
+        case DebugEvent::StepOver: dst->type = CAPI__StepOver; break;
+        case DebugEvent::StepOut: dst->type = CAPI__StepOut; break;
+        case DebugEvent::Nope: dst->type = CAPI__Nope; break;
+        case DebugEvent::LoadPlug: dst->type = CAPI__LoadPlug; break;
+        default: dst->type = CAPI__Nope; break;
+    }
     dst->address = src.address;
     dst->message = strDup(src.message);
     dst->context = src.context;
-    dst->startTrace = src.startTrace;
-    dst->endTrace = src.endTrace;
     dst->prog = strDup(src.prog);
 
     // disasmCode

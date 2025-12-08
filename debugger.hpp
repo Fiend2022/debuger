@@ -130,7 +130,7 @@ private:
     DWORD currentThread;
     DWORD mainThreadId;
     DWORD_PTR exeBaseAddress;
-
+    LPTHREAD_START_ROUTINE entryPoint;
     std::vector<DisasmLine> disasSection(IMAGE_SECTION_HEADER* sec);
     std::pair<std::vector<DisasmLine>, std::vector<DataSection>> getAllSections();
     std::vector<DataLine> getDataSection(IMAGE_SECTION_HEADER* sec);
@@ -178,6 +178,7 @@ private:
 
     std::string resolveSymbol(DWORD_PTR addr);
     void debugRun();
+    void stepDebugLoop(DWORD ms = INFINITE);
 
     void parseCode(std::vector<DisasmLine>* code);
 
@@ -214,7 +215,8 @@ private:
     void handleUnloadDLL(DWORD pid, DWORD tid, DWORD_PTR addr);
     void handleCreateThread(DWORD pid, DWORD tid, CREATE_THREAD_DEBUG_INFO* info);
     void handleExitThread(DWORD pid, DWORD tid, DWORD exitCode);
-    void handleCreateProcess(DWORD pid, DWORD tid, CREATE_PROCESS_DEBUG_INFO* info);
+    void handleCreateProcess(DEBUG_EVENT* debugEvent,
+        std::vector<DisasmLine>& sourceCode, std::vector<DataSection>& sections);
     void handleLoadExe(DWORD_PTR baseAddr, const std::string& name, DWORD_PTR entryPoint);
 
     bool parseSymbols(const std::string& arg, std::string& dll, std::string& symbol);
@@ -242,8 +244,6 @@ private:
 
     void rangeStep();
     bool isTracing = false;
-    DWORD_PTR startTrace = 5;
-    DWORD_PTR endTrace = 0;
     void startTraceRange();
 
     size_t traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de);

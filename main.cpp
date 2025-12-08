@@ -10,13 +10,13 @@
 int main(int argc, char** argv, char** envp)
 {
     GUI gui;
-    Logger logger;
+    //Logger logger;
     Debugger debugger;
     initDebugAPI(&debugger);
 
 
     debugger.attach(&gui);
-    debugger.attach(&logger);
+    //debugger.attach(&logger);
    
     gui.setCommandCallback([&debugger](const std::string& cmd) {
         debugger.sendCommand(cmd);

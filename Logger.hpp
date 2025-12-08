@@ -16,9 +16,7 @@ private:
 	std::string progName;
 
 	std::ofstream logFile;
-	std::ofstream traceFile;
-
-	std::string logDirName = "G:\\debuger\\logs";
+	std::string logDirName = "logs";
 	std::tm getCurTM();
 
 public:
@@ -28,9 +26,7 @@ public:
 	void info(const std::string& msg);
 	void warning(const std::string& msg);
 	void error(const std::string& msg);
-	bool startTrace(DWORD_PTR start, DWORD_PTR end);
-	void endTrace();
-	void trace(const std::string& instruction, const CONTEXT* ctx);
-	void update(const DebugEvent& de) override;
+
+	ObserverResult& update(const DebugEvent& de) override;
 
 };

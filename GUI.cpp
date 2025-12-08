@@ -25,7 +25,7 @@ std::string formatAscii(const std::vector<uint8_t>& buf) {
 GUI::GUI()
 {
     if (!glfwInit()) return;
-
+    priority = ObserverPriority::GUI;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -134,7 +134,6 @@ void GUI::run()
             case DebugEvent::BreakpointSetup:
             case DebugEvent::Run:
             case DebugEvent::HardBreakpointSetup:
-            case DebugEvent::SetupTrace:
             case DebugEvent::DbgError:
             case DebugEvent::DbgWarning:
 
@@ -550,21 +549,22 @@ void GUI::renderDebugButtons()
 
 void GUI::renderRegisters() {
 
-
+    if (context) {
 #ifdef _WIN64
-    ImGui::Text("RAX: %016llX", context.Rax); ImGui::SameLine(300); ImGui::Text("RBX: %016llX", context.Rbx);
-    ImGui::Text("RCX: %016llX", context.Rcx); ImGui::SameLine(300); ImGui::Text("RDX: %016llX", context.Rdx);
-    ImGui::Text("RSI: %016llX", context.Rsi); ImGui::SameLine(300); ImGui::Text("RDI: %016llX", context.Rdi);
-    ImGui::Text("RBP: %016llX", context.Rbp); ImGui::SameLine(300); ImGui::Text("RSP: %016llX", context.Rsp);
-    ImGui::Text("RIP: %016llX", context.Rip);
+        ImGui::Text("RAX: %016llX", context->Rax); ImGui::SameLine(300); ImGui::Text("RBX: %016llX", context->Rbx);
+        ImGui::Text("RCX: %016llX", context->Rcx); ImGui::SameLine(300); ImGui::Text("RDX: %016llX", context->Rdx);
+        ImGui::Text("RSI: %016llX", context->Rsi); ImGui::SameLine(300); ImGui::Text("RDI: %016llX", context->Rdi);
+        ImGui::Text("RBP: %016llX", context->Rbp); ImGui::SameLine(300); ImGui::Text("RSP: %016llX", context->Rsp);
+        ImGui::Text("RIP: %016llX", context->Rip);
 #else
-    ImGui::Text("EAX: %08X", context.Eax); ImGui::SameLine(200); ImGui::Text("EBX: %08X", context.Ebx);
-    ImGui::Text("ECX: %08X", context.Ecx); ImGui::SameLine(200); ImGui::Text("EDX: %08X", context.Edx);
-    ImGui::Text("ESI: %08X", context.Esi); ImGui::SameLine(200); ImGui::Text("EDI: %08X", context.Edi);
-    ImGui::Text("EBP: %08X", context.Ebp); ImGui::SameLine(200); ImGui::Text("ESP: %08X", context.Esp);
-    ImGui::Text("EIP: %08X", context.Eip);
+        ImGui::Text("EAX: %08X", context->Eax); ImGui::SameLine(200); ImGui::Text("EBX: %08X", context->Ebx);
+        ImGui::Text("ECX: %08X", context->Ecx); ImGui::SameLine(200); ImGui::Text("EDX: %08X", context->Edx);
+        ImGui::Text("ESI: %08X", context->Esi); ImGui::SameLine(200); ImGui::Text("EDI: %08X", context->Edi);
+        ImGui::Text("EBP: %08X", context->Ebp); ImGui::SameLine(200); ImGui::Text("ESP: %08X", context->Esp);
+        ImGui::Text("EIP: %08X", context->Eip);
 #endif
-    ImGui::Text("EFLAGS: %08X", context.EFlags);
+        ImGui::Text("EFLAGS: %08X", context->EFlags);
+    }
 }
 
 void GUI::renderData()
@@ -740,10 +740,12 @@ int GUI::textInputCallback(ImGuiInputTextCallbackData* data)
     return 0;
 }
 
-void GUI::update(const DebugEvent& de) 
+ObserverResult& GUI::update(const DebugEvent& de) 
 {
     std::lock_guard<std::mutex> lock(msgMutex);
     msgQueue.push(de);
+    ObserverResult res = { false };
+    return res;
 }
 
 
@@ -778,9 +780,9 @@ void GUI::renderStack() {
             // Выделяем текущий ESP/RSP
             bool isCurrent = (line.address ==
 #ifdef _WIN64
-                context.Rsp
+                context->Rsp
 #else
-                context.Esp
+                context->Esp
 #endif
                 );
 

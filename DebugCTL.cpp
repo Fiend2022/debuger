@@ -1,4 +1,4 @@
-#include "debugger.hpp"
+ï»¿#include "debugger.hpp"
 #include <iostream>
 #include <filesystem>
 #include <vector>
@@ -45,7 +45,7 @@ void Debugger::printRegisters(const CONTEXT& context, std::ostream& output)
     output << std::hex << std::setfill('0');
 
 #ifdef _WIN64
-    // 64-áèòíûå ðåãèñòðû
+    // 64-Ð±Ð¸Ñ‚Ð½Ñ‹Ðµ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ñ‹
     output
         << "rax = " << std::setw(16) << context.Rax << " "
         << "rbx = " << std::setw(16) << context.Rbx << " "
@@ -58,7 +58,7 @@ void Debugger::printRegisters(const CONTEXT& context, std::ostream& output)
         << "rip = " << std::setw(16) << context.Rip << " "
         << "rflags = " << std::setw(16) << context.EFlags << "\n";
 #else
-    // 32-áèòíûå ðåãèñòðû
+    // 32-Ð±Ð¸Ñ‚Ð½Ñ‹Ðµ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ñ‹
     output
         << "eax = " << std::setw(8) << context.Eax << " "
         << "ebx = " << std::setw(8) << context.Ebx << " "
@@ -123,156 +123,142 @@ void Debugger::printMemory(DWORD_PTR addr, std::ostream& stream, size_t size = 1
     }
 }
 
-
-
-
-void Debugger::debugRun()
+void Debugger::handleCreateProcess(DEBUG_EVENT* debugEvent,
+    std::vector<DisasmLine>& sourceCode, std::vector<DataSection>& sections)
 {
-    printf("[DEBUG_RUN] debugRun started\n");
-    while (active)
+    DebugEvent de;
+    std::stringstream ss, disasError;
+    ss << "Process created: " << std::hex << debugEvent->dwProcessId;
+    std::cout << ss.str() << std::endl;
+
+    de.message = ss.str();
+
+    mainThreadId = debugEvent->dwThreadId;
+    handleCreateThread(debugEvent->dwProcessId, debugEvent->dwThreadId, &debugEvent->u.CreateThread);
+
+    exeBaseAddress = (DWORD_PTR)debugEvent->u.CreateProcessInfo.lpBaseOfImage;
+    handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent->u.CreateProcessInfo.lpStartAddress);
+
+    entryPoint = debugEvent->u.CreateProcessInfo.lpStartAddress;
+    DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
+    if (!disasmDebugProc(entryAddr, disasError))
     {
-        DEBUG_EVENT debugEvent;
-        DWORD continueFlag = DBG_CONTINUE;
-        static LPTHREAD_START_ROUTINE entryPoint;
-        if (!WaitForDebugEvent(&debugEvent, INFINITE))
-            break;
-        static std::vector<DisasmLine> sourceCode;
-        static std::vector<DataSection> sections;
-        //printf("[DEBUG_RUN] Debug event: %d, PID: %d, TID: %d\n",
-        //    debugEvent.dwDebugEventCode,
-        //    debugEvent.dwProcessId,
-        //    debugEvent.dwThreadId);
+        DebugEvent event;
+        event.message = disasError.str();
+        event.type = DebugEvent::DbgWarning;
+        notify(event);
+    }
 
 
-        switch (debugEvent.dwDebugEventCode)
-        {
+    initComands();
 
-        case CREATE_THREAD_DEBUG_EVENT:
-            handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
-            break;
-        case EXIT_THREAD_DEBUG_EVENT:
-            handleExitThread(debugEvent.dwProcessId, debugEvent.dwThreadId, debugEvent.u.ExitProcess.dwExitCode);
-            break;
+    std::tie(sourceCode, sections) = getAllSections();
 
-        case CREATE_PROCESS_DEBUG_EVENT:
-        {
-            DebugEvent de;
-            std::stringstream ss, disasError;
-            ss << "Process created: " << std::hex << debugEvent.dwProcessId;
-            std::cout << ss.str() << std::endl;
+    setBreakPoint(entryAddr);
+    printf("Entry addr: %p", entryAddr);
+    auto it = std::find_if(sourceCode.begin(), sourceCode.end(),
+        [entryAddr](const DisasmLine& line)
+        { return line.address == entryAddr; }
+    );
+    it->hasBreakpoint = true;
+    de.address = (DWORD_PTR)entryPoint;
+    de.disasmCode = sourceCode;
+    de.data = sections;
+    de.type = DebugEvent::CreateProc;
 
-            de.message = ss.str();
+    CONTEXT context;
+    context.ContextFlags = CONTEXT_ALL;
+    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE,
+        debugEvent->dwThreadId);
+    GetThreadContext(thread, &context);
+    cont = &context;
 
-            mainThreadId = debugEvent.dwThreadId;
-            handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
+    de.stackData = getStack(64);
+    de.prog = prog->getName();
+    notify(de);
+    CloseHandle(thread);
+}
 
-            exeBaseAddress = (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpBaseOfImage;
-            handleLoadExe(exeBaseAddress, "main.exe", (DWORD_PTR)debugEvent.u.CreateProcessInfo.lpStartAddress);
+void Debugger::stepDebugLoop(DWORD ms)
+{
+    DEBUG_EVENT debugEvent;
+    DWORD continueFlag = DBG_CONTINUE;
 
-            entryPoint = debugEvent.u.CreateProcessInfo.lpStartAddress;
-            DWORD_PTR entryAddr = reinterpret_cast<DWORD_PTR>(entryPoint);
-            if (!disasmDebugProc(entryAddr, disasError))
+    if (WaitForDebugEvent(&debugEvent, ms))
+    {
+            switch (debugEvent.dwDebugEventCode)
             {
-                DebugEvent event;
-                event.message = disasError.str();
-                event.type = DebugEvent::DbgWarning;
-                notify(event);
+            case CREATE_THREAD_DEBUG_EVENT:
+                handleCreateThread(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.CreateThread);
+                break;
+
+            case EXIT_THREAD_DEBUG_EVENT:
+                handleExitThread(debugEvent.dwProcessId, debugEvent.dwThreadId, debugEvent.u.ExitProcess.dwExitCode);
+                break;
+
+            case CREATE_PROCESS_DEBUG_EVENT:
+            {
+                static std::vector<DisasmLine> sourceCode;
+                static std::vector<DataSection> sections;
+                handleCreateProcess(&debugEvent, sourceCode, sections);
+                break;
             }
 
+            case EXIT_PROCESS_DEBUG_EVENT:
+            {
+                std::stringstream ss;
+                ss << "Process exited: " << debugEvent.dwProcessId;
+                DebugEvent de;
+                de.message = ss.str();
+                de.type = DebugEvent::ProcessExit;
+                notify(de);
+                active = false;
+                break;
+            }
 
-            initComands();
+            case LOAD_DLL_DEBUG_EVENT:
+                handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
+                break;
 
-            std::tie(sourceCode, sections) = getAllSections();
+            case UNLOAD_DLL_DEBUG_EVENT:
+                handleUnloadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId,
+                    reinterpret_cast<DWORD_PTR>(debugEvent.u.UnloadDll.lpBaseOfDll));
+                break;
 
-            setBreakPoint(entryAddr);
-            printf("Entry addr: %p", entryAddr);
-            auto it = std::find_if(sourceCode.begin(), sourceCode.end(),
-                [entryAddr](const DisasmLine& line)
-                { return line.address == entryAddr; }
-            );
-            it->hasBreakpoint = true;
-            de.address = (DWORD_PTR)entryPoint;
-            de.disasmCode = sourceCode;
-            de.data = sections;
-            de.type = DebugEvent::CreateProc;
+            case OUTPUT_DEBUG_STRING_EVENT:
+            {
+                DebugEvent de;
+                de.message = std::string("Debug string: ") + debugEvent.u.DebugString.lpDebugStringData;
+                de.type = DebugEvent::DbgStr;
+                notify(de);
+                break;
+            }
 
-            CONTEXT context;
-            context.ContextFlags = CONTEXT_ALL;
-            HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, debugEvent.dwThreadId);
-            GetThreadContext(thread, &context);
-            cont = &context;
+            case EXCEPTION_DEBUG_EVENT:
+                continueFlag = eventException(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.Exception);
+                break;
 
-            de.stackData = getStack(64);
-            de.prog = prog->getName();
-            notify(de);
-            CloseHandle(thread);
-            break;
-        }
-
-        case EXIT_PROCESS_DEBUG_EVENT:
-        {
-            std::stringstream ss;
-            ss << "Process exited: " << debugEvent.dwProcessId << std::endl;
-            DebugEvent de;
-            de.message = ss.str();
-            de.type = DebugEvent::ProcessExit;
-            notify(de);
-            active = false;
-            break;
-        }
-
-        case LOAD_DLL_DEBUG_EVENT:
-        {
-            handleLoadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.LoadDll);
-            //parseCode(&sourceCode);
-
-            //de.address = (DWORD_PTR)entryPoint;
-            //de.disasmCode = sourceCode;
-            //de.type = DebugEvent::ModuleLoad;
-
-            break;
-        }
-
-        case UNLOAD_DLL_DEBUG_EVENT:
-            handleUnloadDLL(debugEvent.dwProcessId, debugEvent.dwThreadId, reinterpret_cast<DWORD_PTR>(debugEvent.u.UnloadDll.lpBaseOfDll));
-
-            break;
-
-        case OUTPUT_DEBUG_STRING_EVENT:
-        {
-            DebugEvent de;
-            de.message = std::string(std::string("Debug string: ") + std::string(debugEvent.u.DebugString.lpDebugStringData));
-            de.type = DebugEvent::DbgStr;
-            notify(de);
-            break;
-        }
-
-        case EXCEPTION_DEBUG_EVENT:
-
-            continueFlag = eventException(debugEvent.dwProcessId, debugEvent.dwThreadId, &debugEvent.u.Exception);
-            break;
-
-        default:
-        {
-            DebugEvent de;
-            de.message = std::string("Unexpected debug event:" + std::to_string(debugEvent.dwDebugEventCode));
-            break;
-        }
+            default:
+            {
+                DebugEvent de;
+                de.message = "Unexpected debug event: " + std::to_string(debugEvent.dwDebugEventCode);
+                notify(de);
+                break;
+            }
         }
 
         if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueFlag))
         {
-            std::stringstream ss;
-            ss << "Error continuing debug event" << std::endl;
             DebugEvent de;
-            de.message = ss.str();
+            de.message = "Error continuing debug event";
+            de.type = DebugEvent::DbgError;
+            notify(de);
         }
-
         else
         {
             auto it = std::find_if(breakMap.begin(), breakMap.end(), [](const auto& pair)
                 {
-                    return pair.second.state == BreakState::disable;
+                return pair.second.state == BreakState::disable;
                 });
             if (it != breakMap.end())
             {
@@ -280,10 +266,13 @@ void Debugger::debugRun()
                 it->second.state = BreakState::enable;
             }
         }
-
-
     }
-
+}
+void Debugger::debugRun()
+{
+    //printf("[DEBUG_RUN] debugRun started\n");
+    while (active)
+        stepDebugLoop();
     CloseHandle(hProcess);
 
     return;
@@ -333,7 +322,7 @@ size_t Debugger::breakpointEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent*
 
     this->cont = &context;
     setIP(exceptionAddr);
-    de->context = *cont;
+    de->context = cont;
     de->address = exceptionAddr;
     de->stackData = getStack(64);
     notify(*de);
@@ -395,48 +384,17 @@ size_t Debugger::eventException(DWORD pid, DWORD tid, LPEXCEPTION_DEBUG_INFO exc
     ctx.ContextFlags = CONTEXT_ALL;
     if (!GetThreadContext(thread, &ctx)) return DBG_EXCEPTION_NOT_HANDLED;
     cont = &ctx;
-    if (getIP() >= startTrace && getIP() <= endTrace && (state != TRACING && state != TRACE_RUN))
-        state = TRACING;
+
 
     switch (exc->ExceptionRecord.ExceptionCode)
     {
     case EXCEPTION_BREAKPOINT:
-        if (state == TRACING || state == TRACE_RUN)
-        {
-            disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
-            setIP((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
-            auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
-            de.type = DebugEvent::TraceStep;
-            std::stringstream ss;
-            disasmDebugProc(getIP(), ss, 1);
-            de.context = *cont;
-            de.message = ss.str();
-            notify(de);
-            SetThreadContext(thread, &ctx);
-            CloseHandle(thread);
-            return ret;
-        }
         de.type = DebugEvent::BreakpointEvent;
         return breakpointEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
 
     case EXCEPTION_SINGLE_STEP:
     {
 
-        if (state == TRACING || state == TRACE_RUN)
-        {
-            disableBreakPoint((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
-            setIP((DWORD_PTR)exc->ExceptionRecord.ExceptionAddress);
-            auto ret = traceRangeEvent(tid, (DWORD_PTR)exc->ExceptionRecord.ExceptionAddress, &de);
-            de.type = DebugEvent::TraceStep;
-            std::stringstream ss;
-            disasmDebugProc(getIP(), ss, 1);
-            de.context = *cont;
-            de.message = ss.str();
-            notify(de);
-            SetThreadContext(thread, &ctx);
-            CloseHandle(thread);
-            return ret;
-        }
         int drIndex = getHardwareBreakpointIndexFromDr6(ctx.Dr6);
         if (drIndex != -1 && hwBps[drIndex].active)
         {
@@ -488,18 +446,17 @@ void Debugger::commandLine(const std::string& command)
 
     if (it != commands.end())
     {
-        try {
-            std::string output = it->handler(*this, iss);
+        try
+        {
             auto type = it->type;
+            std::string output = it->handler(*this, iss);
             DebugEvent de;
 
             de.address = getIP();
-            de.context = *cont;
+            de.context = cont;
             de.type = type;
             de.message = output;
             de.stackData = getStack(64);
-            de.startTrace = startTrace;
-            de.endTrace = endTrace;
             //std::tie(de.disasmCode, de.data) = getSections();
             notify(de);
         }
@@ -528,7 +485,7 @@ DWORD_PTR Debugger::getAddr(std::istringstream& stream)
         return 0;
 
 
-    // Îáðàáàòûâàåì ïðåôèêñ 0x, åñëè îí åñòü
+    // ÐžÐ±Ñ€Ð°Ð±Ð°Ñ‚Ñ‹Ð²Ð°ÐµÐ¼ Ð¿Ñ€ÐµÑ„Ð¸ÐºÑ 0x, ÐµÑÐ»Ð¸ Ð¾Ð½ ÐµÑÑ‚ÑŒ
     if (addrStr.size() > 2 && addrStr[0] == '0' && (addrStr[1] == 'x' || addrStr[1] == 'X')) {
         addrStr = addrStr.substr(2);
     }
@@ -583,7 +540,7 @@ void Debugger::handleRegCommand(std::istringstream& input, std::ostream& output,
         return;
     }
 
-    // ×èòàåì èìÿ ðåãèñòðà è çíà÷åíèå
+    // Ð§Ð¸Ñ‚Ð°ÐµÐ¼ Ð¸Ð¼Ñ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð° Ð¸ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ
     input >> regName;
     if (!(input >> std::hex >> value)) {
         output << "Invalid value format. Expected hexadecimal value.\n";
@@ -793,6 +750,7 @@ void Debugger::handleSymbolsCommand()
             << " = 0x" << std::hex << addr << std::endl;
     }
 }
+
 
 
 
@@ -1067,7 +1025,7 @@ void Debugger::initComands()
                     dbg.state = DebugState::STEP;
                     return std::string("");
                 },
-                 DebugEvent::Type::Step
+                 DebugEvent::Type::Nope
         },
 
         {
@@ -1208,6 +1166,8 @@ void Debugger::initComands()
             [](Debugger& dbg, std::istringstream& stream) -> std::string
             {
                     dbg.active = false;
+                    if (dbg.hProcess)
+                        TerminateProcess(dbg.hProcess, 0);
                     return "";
             },
             DebugEvent::Type::ProcessExit
@@ -1220,7 +1180,7 @@ void Debugger::initComands()
                 dbg.stepOut();
                 return "";
             },
-            DebugEvent::Type::StepOut
+            DebugEvent::Type::Nope
         },
         {
             "p",
@@ -1230,55 +1190,55 @@ void Debugger::initComands()
                 dbg.stepOver();
                 return "";
             },
-            DebugEvent::Type::StepOver
+            DebugEvent::Type::Nope
         },
-        {
-            "trace",
-            "trace <start> <end>",
-            [](Debugger& dbg, std::istringstream& stream) -> std::string
-            {
-                    std::string startStr, endStr;
-                    if (!(stream >> startStr >> endStr))
+        //{
+        //    "trace",
+        //    "trace <start> <end>",
+        //    [](Debugger& dbg, std::istringstream& stream) -> std::string
+        //    {
+        //            std::string startStr, endStr;
+        //            if (!(stream >> startStr >> endStr))
 
-                        return "Usage: trace <start> <end>";
+        //                return "Usage: trace <start> <end>";
 
-                    DWORD_PTR start = dbg.getArgAddr(startStr);
-                    DWORD_PTR end = dbg.getArgAddr(endStr);
-                    if (!start || !end)
-                        return "Usage: trace <start> <end>";
+        //            DWORD_PTR start = dbg.getArgAddr(startStr);
+        //            DWORD_PTR end = dbg.getArgAddr(endStr);
+        //            if (!start || !end)
+        //                return "Usage: trace <start> <end>";
 
-                    if (start > end)
-                    {
-                        return "Error: start > end!\nUsage: trace <start> <end>";
-                    }
-                    dbg.startTrace = start;
-                    dbg.endTrace = end;
-                    if (dbg.getIP() >= start && dbg.getIP() <= end)
-                        dbg.state = dbg.DebugState::TRACING;
+        //            if (start > end)
+        //            {
+        //                return "Error: start > end!\nUsage: trace <start> <end>";
+        //            }
+        //            dbg.startTrace = start;
+        //            dbg.endTrace = end;
+        //            if (dbg.getIP() >= start && dbg.getIP() <= end)
+        //                dbg.state = dbg.DebugState::TRACING;
 
-                    else
-                    {
+        //            else
+        //            {
 
 
-                        if (!dbg.setBreakPoint(start, true))
-                        {
-                            std::stringstream errMsg;
-                            errMsg << "Failed to setup BreakPoint on start of range: " << start;
-                            throw  std::runtime_error(errMsg.str());
-                        }
+        //                if (!dbg.setBreakPoint(start, true))
+        //                {
+        //                    std::stringstream errMsg;
+        //                    errMsg << "Failed to setup BreakPoint on start of range: " << start;
+        //                    throw  std::runtime_error(errMsg.str());
+        //                }
 
-                        if (!dbg.setBreakPoint(end, true))
-                        {
-                            std::stringstream errMsg;
-                            errMsg << "Failed to setup BreakPoint on end of range: " << start;
-                            throw  std::runtime_error(errMsg.str());
-                        }
+        //                if (!dbg.setBreakPoint(end, true))
+        //                {
+        //                    std::stringstream errMsg;
+        //                    errMsg << "Failed to setup BreakPoint on end of range: " << start;
+        //                    throw  std::runtime_error(errMsg.str());
+        //                }
 
-                    }
-                    return "";
-            },
-            DebugEvent::Type::SetupTrace
-        },
+        //            }
+        //            return "";
+        //    },
+        //    DebugEvent::Type::SetupTrace
+        //},
         {
             "hwdel",
             "hwdel <addres>",
@@ -1400,47 +1360,47 @@ void Debugger::sendCommand(const std::string& cmd)
 
 
 
-void Debugger::rangeStep()
-{
-    DWORD_PTR currIP = getIP();
-    if (currIP < startTrace || currIP > endTrace)
-    {
-        state = RUN;
-        cont->EFlags &= ~0x100;
-        return;
-    }
-    std::stringstream ss;
-    disasmDebugProc(currIP, ss, 1);
-}
+//void Debugger::rangeStep()
+//{
+//    DWORD_PTR currIP = getIP();
+//    if (currIP < startTrace || currIP > endTrace)
+//    {
+//        state = RUN;
+//        cont->EFlags &= ~0x100;
+//        return;
+//    }
+//    std::stringstream ss;
+//    disasmDebugProc(currIP, ss, 1);
+//}
 
 
-void Debugger::startTraceRange()
-{
-    state = TRACING;
-    cont->EFlags |= 0x100;
-}
+//void Debugger::startTraceRange()
+//{
+//    state = TRACING;
+//    cont->EFlags |= 0x100;
+//}
 
 
-size_t Debugger::traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de)
-{
-    std::stringstream ss;
-    size_t len = disasmDebugProc(exceptionAddr, ss, 1);
-    if (ss.str().find("call") != std::string::npos)
-    {
-        DWORD_PTR addr;
-        std::string call;
-        ss >> call >> call >> call >> addr;
-        if (addr < startTrace || addr > endTrace)
-        {
-            setBreakPoint(exceptionAddr + len, true);
-            state = TRACE_RUN;
-        }
-    }
-
-    rangeStep();
-    return DBG_CONTINUE;
-
-}
+//size_t Debugger::traceRangeEvent(DWORD tid, DWORD_PTR exceptionAddr, DebugEvent* de)
+//{
+//    std::stringstream ss;
+//    size_t len = disasmDebugProc(exceptionAddr, ss, 1);
+//    if (ss.str().find("call") != std::string::npos)
+//    {
+//        DWORD_PTR addr;
+//        std::string call;
+//        ss >> call >> call >> call >> addr;
+//        if (addr < startTrace || addr > endTrace)
+//        {
+//            setBreakPoint(exceptionAddr + len, true);
+//            state = TRACE_RUN;
+//        }
+//    }
+//
+//    rangeStep();
+//    return DBG_CONTINUE;
+//
+//}
 
 
 

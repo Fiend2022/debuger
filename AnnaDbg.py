@@ -7,49 +7,114 @@ import threading
 import platform
 
 
-class CONTEXT(Structure):
+from ctypes import wintypes
+
+
+
+DWORD64 = ctypes.c_uint64
+
+# FLOATING_SAVE_AREA / M128A используется в XSAVE
+class M128A(ctypes.Structure):
     _fields_ = [
-        ("P1Home", c_uint64),
-        ("P2Home", c_uint64),
-        ("P3Home", c_uint64),
-        ("P4Home", c_uint64),
-        ("P5Home", c_uint64),
-        ("P6Home", c_uint64),
-        ("ContextFlags", c_uint32),
-        ("MxCsr", c_uint32),
-        ("SegCs", c_uint16),
-        ("SegDs", c_uint16),
-        ("SegEs", c_uint16),
-        ("SegFs", c_uint16),
-        ("SegGs", c_uint16),
-        ("SegSs", c_uint16),
-        ("EFlags", c_uint32),
-        ("Dr0", c_uint64),
-        ("Dr1", c_uint64),
-        ("Dr2", c_uint64),
-        ("Dr3", c_uint64),
-        ("Dr6", c_uint64),
-        ("Dr7", c_uint64),
-        ("Rax", c_uint64),
-        ("Rcx", c_uint64),
-        ("Rdx", c_uint64),
-        ("Rbx", c_uint64),
-        ("Rsp", c_uint64),
-        ("Rbp", c_uint64),
-        ("Rsi", c_uint64),
-        ("Rdi", c_uint64),
-        ("R8", c_uint64),
-        ("R9", c_uint64),
-        ("R10", c_uint64),
-        ("R11", c_uint64),
-        ("R12", c_uint64),
-        ("R13", c_uint64),
-        ("R14", c_uint64),
-        ("R15", c_uint64),
-        ("Rip", c_uint64),
+        ("Low",  ctypes.c_uint64),
+        ("High", ctypes.c_int64),
     ]
 
+class XSAVE_FORMAT(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("ControlWord",    wintypes.WORD),
+        ("StatusWord",     wintypes.WORD),
+        ("TagWord",        wintypes.BYTE),
+        ("Reserved1",      wintypes.BYTE),
+        ("ErrorOpcode",    wintypes.WORD),
+        ("ErrorOffset",    DWORD64),
+        ("ErrorSelector",  wintypes.WORD),
+        ("Reserved2",      wintypes.WORD),
+        ("DataOffset",     DWORD64),
+        ("DataSelector",   wintypes.WORD),
+        ("Reserved3",      wintypes.WORD),
+        ("MxCsr",          wintypes.DWORD),
+        ("MxCsr_Mask",     wintypes.DWORD),
+        ("FloatRegisters", M128A * 8),
+        ("XmmRegisters",   M128A * 16),
+        ("Reserved4",      wintypes.BYTE * 96),
+    ]
 
+# Альтернативное имя — используется в старых версиях SDK
+XMM_SAVE_AREA32 = XSAVE_FORMAT
+
+class DUMMYUNIONNAME(ctypes.Union):
+    _fields_ = [
+        ("FltSave", XSAVE_FORMAT),
+        ("xmm", M128A * 26),
+    ]
+
+class CONTEXT(ctypes.Structure):
+    _pack_ = 16  # важно для выравнивания на x64
+    _fields_ = [
+        # Регистры отладки и сегментные (используются редко)
+        ("P1Home", DWORD64),
+        ("P2Home", DWORD64),
+        ("P3Home", DWORD64),
+        ("P4Home", DWORD64),
+        ("P5Home", DWORD64),
+        ("P6Home", DWORD64),
+
+        # Флаги состояния
+        ("ContextFlags",      wintypes.DWORD),
+        ("MxCsr",             wintypes.DWORD),
+
+        # Сегментные регистры
+        ("SegCs",             wintypes.WORD),
+        ("SegDs",             wintypes.WORD),
+        ("SegEs",             wintypes.WORD),
+        ("SegFs",             wintypes.WORD),
+        ("SegGs",             wintypes.WORD),
+        ("SegSs",             wintypes.WORD),
+
+        # Регистры состояния процессора
+        ("EFlags",            wintypes.DWORD),
+        ("Dr0",               DWORD64),
+        ("Dr1",               DWORD64),
+        ("Dr2",               DWORD64),
+        ("Dr3",               DWORD64),
+        ("Dr6",               DWORD64),
+        ("Dr7",               DWORD64),
+
+        # Регистры общего назначения (целочисленные)
+        ("Rax",               DWORD64),
+        ("Rcx",               DWORD64),
+        ("Rdx",               DWORD64),
+        ("Rbx",               DWORD64),
+        ("Rsp",               DWORD64),
+        ("Rbp",               DWORD64),
+        ("Rsi",               DWORD64),
+        ("Rdi",               DWORD64),
+        ("R8",                DWORD64),
+        ("R9",                DWORD64),
+        ("R10",               DWORD64),
+        ("R11",               DWORD64),
+        ("R12",               DWORD64),
+        ("R13",               DWORD64),
+        ("R14",               DWORD64),
+        ("R15",               DWORD64),
+        ("Rip",               DWORD64),
+
+        # Объединение: либо SSE/FP состояние как структура, либо как массив xmm
+        ("DUMMYUNIONNAME",    DUMMYUNIONNAME),
+
+        # Векторные регистры (YMM, если поддерживается)
+        ("VectorRegister",    M128A * 26),
+        ("VectorControl",     DWORD64),
+
+        # Отладочные регистры (для отладчиков)
+        ("DebugControl",      DWORD64),
+        ("LastBranchToRip",   DWORD64),
+        ("LastBranchFromRip", DWORD64),
+        ("LastExceptionToRip", DWORD64),
+        ("LastExceptionFromRip", DWORD64),
+    ]
 class CDisasmLine(Structure):
     _fields_ = [
         ("address", c_uint64),
@@ -84,6 +149,7 @@ class CStackLine(Structure):
 
 
 class CDebugEvent(Structure):
+    _pack_ = 8
     _fields_ = [
         ("type", c_int),
         ("address", c_uint64),
@@ -212,6 +278,7 @@ dbg_free_hw_bp_list = CFUNCTYPE(None, POINTER(CHwBreakPoint))
 dbg_free_modules =  CFUNCTYPE(None, POINTER(CModule), c_size_t)
 dbg_free_threads = CFUNCTYPE(None, POINTER(CActiveThread))
 dbg_add_new_cmd = CFUNCTYPE(None, POINTER(PlugCmd))
+dbg_step_debug_loop_fn = CFUNCTYPE(None)
 
 class DebugCAPI(Structure):
     _fields_ = [
@@ -237,6 +304,7 @@ class DebugCAPI(Structure):
         ("detach", dbg_detach_fn),
         ("launchProg", dbg_launch_fn),
         ("dbgLoop", dbg_loop_fn),
+        ("stepDebugLoop", dbg_step_debug_loop_fn),
         ("freeBpList", dbg_free_bp_list),
         ("freeHwBpList", dbg_free_hw_bp_list),
         ("freeModules", dbg_free_modules),
@@ -348,6 +416,8 @@ class AnnaDBG:
     def EventLoop(self):
         self.api.dbgLoop()
 
+    def stepDebugLoop(self):
+        self.apt.stepDebugLoop()
 
     def subscribeEvents(self, callback, user_data=None, plug_name=""):
 
